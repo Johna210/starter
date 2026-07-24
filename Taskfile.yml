@@ -1,0 +1,30 @@
+# Taskfile.yml — Starter repo orchestrator.
+#
+# Per decision 8: a single root orchestrator fans out cross-language
+# tasks (dev, test, build) to pnpm, `go run`, `uvicorn`, etc. Today
+# (prefactor, empty repo) every target is a no-op; subsequent tickets
+# will compose per-workspace work under these entrypoints.
+
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  dev:
+    desc: Start development servers for all workspaces
+    cmds:
+      - 'echo "starter: dev - no workspaces to run yet"'
+
+  test:
+    desc: Run the test suite (Taskfile contract + per-workspace tests)
+    cmds:
+      - bash tests/contract.sh
+
+  build:
+    desc: Build all workspaces
+    cmds:
+      - 'echo "starter: build - no workspaces to build yet"'
