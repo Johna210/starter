@@ -1,0 +1,15 @@
+{
+  "name": "starter",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reusable starting point for new fullstack projects (CLI scaffolder).",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "test": "task test",
+    "build": "task build"
+  }
+}
