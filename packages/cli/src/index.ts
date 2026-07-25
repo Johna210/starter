@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// create-fs-starter — scaffold a new fullstack project from this Starter.
+// create-fs-starter — entry point.
 //
-// The CLI composes five prompt axes (decision 24):
-//   1. backend-language  (TS | Go)
-//   2. topology          (monolith | microservices)
-//   3. web variant       (Next | Vite+TanStack | TanStack-Start-later)
-//   4. mobile            (Expo | Flutter | none)
-//   5. AI                (on | off)
-//
-// For this ticket only one composition is implemented:
-//   TS-monolith + Vite+TanStack + no-mobile + no-AI
-// All other compositions produce a friendly error (and the CLI's own
-// tests assert those error paths).
+// Thin wrapper: parses argv, hands off to runCli, exits with the right
+// code. The testable core lives in ./cli.js (runCli).
 
-const VERSION = '0.1.0';
+import { runCli } from './cli.js';
 
-console.log(`create-fs-starter v${VERSION}`);
-console.log('Scaffolding logic lands in subsequent commits (composition, materializer, prompts).');
+const argv = process.argv.slice(2);
+runCli(argv).then((result) => {
+  if (!result.ok) {
+    if (result.reason !== 'usage' || result.exitCode !== 0) {
+      console.error(result.message);
+    } else {
+      console.log(result.message);
+    }
+    process.exit(result.exitCode);
+  }
+});
