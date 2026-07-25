@@ -1,9 +1,12 @@
 # Taskfile.yml — Starter repo orchestrator.
 #
 # Per decision 8: a single root orchestrator fans out cross-language
-# tasks (dev, test, build) to pnpm, `go run`, `uvicorn`, etc. Today
-# (prefactor, empty repo) every target is a no-op; subsequent tickets
-# will compose per-workspace work under these entrypoints.
+# tasks (dev, test, build) to pnpm, `go run`, `uvicorn`, etc.
+#
+# Today the Starter repo's `dev`/`build` targets are no-ops (the
+# Starter is a scaffolder, not a deployable). Subsequent tickets add
+# scaffolded apps/* and packages/* whose work composes under these
+# entrypoints; the per-workspace work is under `cli:*`, `web:*`, etc.
 
 version: "3"
 
@@ -15,16 +18,45 @@ tasks:
     silent: true
 
   dev:
-    desc: Start development servers for all workspaces
+    desc: 'Develop the Starter repo (no-op until apps land; today: task cli:dev)'
     cmds:
-      - 'echo "starter: dev - no workspaces to run yet"'
+      - 'echo starter: dev is a meta-task. Use `task cli:dev` to work on the CLI, or wait for apps/* workspaces to land in later tickets.'
 
   test:
-    desc: Run the test suite (Taskfile contract + per-workspace tests)
+    desc: Run all tests (Taskfile contract + per-workspace tests)
+    cmds:
+      - task: test:contract
+      - task: test:cli
+
+  test:contract:
+    desc: Run the Taskfile contract test
     cmds:
       - bash tests/contract.sh
+
+  test:cli:
+    desc: Run the CLI's vitest suite
+    cmds:
+      - pnpm --filter create-fs-starter test
 
   build:
     desc: Build all workspaces
     cmds:
-      - 'echo "starter: build - no workspaces to build yet"'
+      - task: cli:build
+
+  cli:dev:
+    desc: Run the CLI in watch mode
+    dir: packages/cli
+    cmds:
+      - pnpm dev
+
+  cli:test:
+    desc: Run the CLI's vitest suite
+    dir: packages/cli
+    cmds:
+      - pnpm test
+
+  cli:build:
+    desc: Build the CLI (tsc -> dist/)
+    dir: packages/cli
+    cmds:
+      - pnpm build
