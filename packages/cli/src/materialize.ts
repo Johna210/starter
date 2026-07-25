@@ -65,9 +65,8 @@ async function writeTsMonolithVite(ctx: ProjectContext): Promise<void> {
   await writeFileRecursive(join(targetDir, 'apps/web/index.html'), webIndexHtml());
   await writeFileRecursive(join(targetDir, 'apps/web/src/main.tsx'), webMainTsx());
   await writeFileRecursive(join(targetDir, 'apps/web/src/app.css'), webAppCss());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/routes/__root.tsx'), webRootRoute());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/routes/index.tsx'), webIndexRoute());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/router.ts'), webRouter());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/router.tsx'), webRouter());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/pages/index.tsx'), webIndexPage());
 
   // apps/api — Hono shell (no routes yet beyond /health)
   await writeFileRecursive(join(targetDir, 'apps/api/package.json'), apiPackageJson());
@@ -129,8 +128,7 @@ tasks:
   dev:
     desc: Boot the full stack (web + api) in parallel
     cmds:
-      - task: dev:web
-      - task: dev:api
+      - 'task dev:web & task dev:api & wait'
 
   dev:web:
     dir: apps/web
@@ -298,13 +296,9 @@ function webTsconfigJson(): string {
 function webViteConfig(): string {
   return `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
 
 export default defineConfig({
-  plugins: [
-    TanStackRouterVite({ target: 'react', autoCodeSplitting: true }),
-    react(),
-  ],
+  plugins: [react()],
   server: {
     port: 5173,
   },
@@ -367,23 +361,8 @@ body {
 `;
 }
 
-function webRootRoute(): string {
-  return `import { createRootRoute, Outlet } from '@tanstack/react-router';
-
-export const Route = createRootRoute({
-  component: () => <Outlet />,
-});
-`;
-}
-
-function webIndexRoute(): string {
-  return `import { createFileRoute } from '@tanstack/react-router';
-
-export const Route = createFileRoute('/')({
-  component: IndexComponent,
-});
-
-function IndexComponent() {
+function webIndexPage(): string {
+  return `export function IndexPage() {
   return (
     <main style={{ padding: '2rem' }}>
       <h1>Scaffolded app</h1>
@@ -395,8 +374,20 @@ function IndexComponent() {
 }
 
 function webRouter(): string {
-  return `import { createRouter } from '@tanstack/react-router';
-import { routeTree } from './routeTree.gen';
+  return `import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
+import { IndexPage } from './pages/index';
+
+const rootRoute = createRootRoute({
+  component: () => <Outlet />,
+});
+
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  component: IndexPage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute]);
 
 export const router = createRouter({ routeTree });
 
