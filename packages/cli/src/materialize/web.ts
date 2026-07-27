@@ -22,6 +22,7 @@ export async function writeWeb(ctx: ProjectContext): Promise<void> {
   await writeFileRecursive(join(targetDir, 'apps/web/src/app.css'), webAppCss());
   await writeFileRecursive(join(targetDir, 'apps/web/src/router.tsx'), webRouter());
   await writeFileRecursive(join(targetDir, 'apps/web/src/pages/index.tsx'), webIndexPage());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/pages/items.tsx'), webItemsPage());
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/api.ts'), webLibApi());
   await writeFileRecursive(join(targetDir, 'apps/web/src/config.ts'), webConfigTs());
 }
@@ -155,11 +156,119 @@ body {
 }
 
 function webIndexPage(): string {
-  return `export function IndexPage() {
+  return `import { Link } from '@tanstack/react-router';
+
+export function IndexPage() {
   return (
     <main style={{ padding: '2rem' }}>
       <h1>Starter — TS-monolith</h1>
       <p>Web shell is up. api-client is wired in via <code>src/lib/api.ts</code>.</p>
+      <p>
+        <Link to="/items">View items →</Link>
+      </p>
+    </main>
+  );
+}
+`;
+}
+
+function webItemsPage(): string {
+  return `// @starter/web — items page (issue 05).
+//
+// The first end-to-end view of the spine: web → api-client → api → db.
+// Lists items via TanStack Query against the typed api-client and lets
+// the user create a new one through a small form. The list refreshes
+// after a successful create via TanStack Query invalidation. **No
+// auth yet** — the page is open; issue 06 adds the login flow and
+// wraps the page in a redirect-when-unauthenticated guard.
+//
+// Type discipline: the \`Item\` type is inferred from the api-client's
+// response shape via \`Awaited<ReturnType<typeof fetchItems>>\`. The
+// api route is the single source of truth — no manual interface, no
+// \`any\` (decision 17/18: end-to-end Hono RPC inference).
+
+import { useState, type FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
+import { apiClient } from '../lib/api';
+
+async function fetchItems() {
+  const res = await apiClient.items.$get();
+  if (!res.ok) {
+    throw new Error(\`Failed to load items: \${res.status}\`);
+  }
+  return res.json();
+}
+
+type Item = Awaited<ReturnType<typeof fetchItems>>[number];
+
+export function ItemsPage() {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+
+  const itemsQuery = useQuery({
+    queryKey: ['items'],
+    queryFn: fetchItems,
+  });
+
+  const createItem = useMutation({
+    mutationFn: async (newName: string) => {
+      const res = await apiClient.items.$post({ json: { name: newName } });
+      if (!res.ok) {
+        throw new Error(\`Failed to create item: \${res.status}\`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      // Refresh the list (decision 22: the single source of truth for
+      // items lives on the api, not in this client's cache).
+      void queryClient.invalidateQueries({ queryKey: ['items'] });
+      setName('');
+    },
+  });
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    createItem.mutate(trimmed);
+  };
+
+  return (
+    <main style={{ padding: '2rem' }}>
+      <p>
+        <Link to="/">← Home</Link>
+      </p>
+      <h1>Items</h1>
+
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}
+      >
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Item name"
+          maxLength={256}
+          required
+          aria-label="Item name"
+        />
+        <button type="submit" disabled={createItem.isPending}>
+          {createItem.isPending ? 'Creating…' : 'Create'}
+        </button>
+      </form>
+
+      {itemsQuery.isPending && <p>Loading…</p>}
+      {itemsQuery.isError && <p>Error: {String(itemsQuery.error)}</p>}
+      {itemsQuery.data && itemsQuery.data.length === 0 && <p>No items yet.</p>}
+      {itemsQuery.data && itemsQuery.data.length > 0 && (
+        <ul>
+          {itemsQuery.data.map((item) => (
+            <li key={item.id}>{item.name}</li>
+          ))}
+        </ul>
+      )}
     </main>
   );
 }
@@ -169,6 +278,7 @@ function webIndexPage(): string {
 function webRouter(): string {
   return `import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { IndexPage } from './pages/index';
+import { ItemsPage } from './pages/items';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -180,7 +290,15 @@ const indexRoute = createRoute({
   component: IndexPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute]);
+// /items — the first end-to-end view of the spine (issue 05).
+// Unprotected for now; issue 06 wraps it in a redirect-to-login guard.
+const itemsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/items',
+  component: ItemsPage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, itemsRoute]);
 
 export const router = createRouter({ routeTree });
 
