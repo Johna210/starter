@@ -55,6 +55,168 @@ describe('materialize', () => {
       }
     });
 
+    it('root README documents the items demo, the db layer, and the migration command', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      expect(readme).toMatch(/items/);
+      expect(readme).toMatch(/db|migrate/i);
+    });
+
+    it('root Taskfile declares db-related targets (migrate, test:db)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      expect(tf).toContain('migrate:');
+      expect(tf).toContain('test:db');
+      expect(tf).toContain('packages/db');
+    });
+
+    it('apps/web depends on @starter/api-client and uses it in a typed smoke import', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'apps/web/package.json'), 'utf8'),
+      );
+      expect(pkg.dependencies['@starter/api-client']).toBe('workspace:*');
+
+      const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
+      expect(api).toContain('@starter/api-client');
+      expect(api).toContain('createApiClient');
+    });
+
+    it('writes the packages/api-client workspace (typed Hono RPC client)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const dir = join(targetDir, 'packages/api-client');
+      expect((await stat(dir)).isDirectory()).toBe(true);
+      for (const file of ['package.json', 'tsconfig.json', 'src/index.ts']) {
+        expect((await stat(join(dir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('packages/api-client exports createApiClient typed via Hono RPC', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(
+        join(targetDir, 'packages/api-client/src/index.ts'),
+        'utf8',
+      );
+      expect(idx).toContain('createApiClient');
+      expect(idx).toContain('hono/client');
+      expect(idx).toContain('@starter/api');
+      expect(idx).toMatch(/hc</);
+    });
+
+    it('packages/api-client/package.json declares @starter/api-client and the right deps', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'packages/api-client/package.json'), 'utf8'),
+      );
+      expect(pkg.name).toBe('@starter/api-client');
+      expect(pkg.dependencies['@starter/api']).toBe('workspace:*');
+      expect(pkg.dependencies['hono']).toEqual(expect.any(String));
+    });
+
+    it('writes the apps/api internal/items module (repo + routes + drizzle impl)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const itemsDir = join(targetDir, 'apps/api/src/internal/items');
+      expect((await stat(itemsDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'items.repo.ts',
+        'items.repo.drizzle.ts',
+        'items.routes.ts',
+        'index.ts',
+      ]) {
+        expect((await stat(join(itemsDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('items.repo.ts declares the typed ItemsRepo interface', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const repo = await readFile(
+        join(targetDir, 'apps/api/src/internal/items/items.repo.ts'),
+        'utf8',
+      );
+      expect(repo).toContain('ItemsRepo');
+      expect(repo).toContain('list');
+      expect(repo).toContain('create');
+    });
+
+    it('items.routes.ts exposes GET and POST handlers via a Hono router factory', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const routes = await readFile(
+        join(targetDir, 'apps/api/src/internal/items/items.routes.ts'),
+        'utf8',
+      );
+      expect(routes).toContain('Hono');
+      expect(routes).toMatch(/items\.(get|post)\(/);
+      expect(routes).toContain('makeItemsRoutes');
+    });
+
+    it('items.repo.drizzle.ts is the Drizzle-backed implementation of ItemsRepo', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const impl = await readFile(
+        join(targetDir, 'apps/api/src/internal/items/items.repo.drizzle.ts'),
+        'utf8',
+      );
+      expect(impl).toContain('ItemsRepo');
+      expect(impl).toContain('@starter/db');
+      expect(impl).toMatch(/drizzle-orm/);
+    });
+
+    it('writes the packages/db workspace (Drizzle + items schema + migration)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const dbDir = join(targetDir, 'packages/db');
+      expect((await stat(dbDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'package.json',
+        'tsconfig.json',
+        'drizzle.config.ts',
+        '.env.example',
+        'src/index.ts',
+        'src/config.ts',
+        'src/client.ts',
+        'src/schema/items.ts',
+        'migrations/0000_items.sql',
+      ]) {
+        expect((await stat(join(dbDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('packages/db/package.json declares @starter/db and the right deps', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'packages/db/package.json'), 'utf8'),
+      );
+      expect(pkg.name).toBe('@starter/db');
+      expect(pkg.dependencies['drizzle-orm']).toEqual(expect.any(String));
+      expect(pkg.dependencies['pg']).toEqual(expect.any(String));
+      expect(pkg.dependencies['zod']).toEqual(expect.any(String));
+      expect(pkg.devDependencies['drizzle-kit']).toEqual(expect.any(String));
+    });
+
+    it('packages/db migrations create the items table with id, name, created_at', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const sql = await readFile(
+        join(targetDir, 'packages/db/migrations/0000_items.sql'),
+        'utf8',
+      );
+      expect(sql).toMatch(/CREATE TABLE/i);
+      expect(sql).toMatch(/items/i);
+      expect(sql).toContain('"id"');
+      expect(sql).toContain('"name"');
+      expect(sql).toContain('"created_at"');
+    });
+
+    it('packages/db exports the itemsTable from the schema barrel', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const index = await readFile(join(targetDir, 'packages/db/src/index.ts'), 'utf8');
+      expect(index).toContain('itemsTable');
+    });
+
+    it('packages/db ships a zod-validated config with a databaseUrl schema', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const cfg = await readFile(join(targetDir, 'packages/db/src/config.ts'), 'utf8');
+      expect(cfg).toContain('zod');
+      expect(cfg).toMatch(/databaseUrl/i);
+    });
+
     it('substitutes the project name in the root package.json', async () => {
       await materialize({ targetDir, name: 'my-cool-app' }, TS_MONOLITH_VITE);
       const pkg = JSON.parse(await readFile(join(targetDir, 'package.json'), 'utf8'));
