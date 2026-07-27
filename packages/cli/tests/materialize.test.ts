@@ -163,6 +163,74 @@ describe('materialize', () => {
       expect(router).toMatch(/import\s*\{[^}]*ItemsPage[^}]*\}\s*from\s*['"]\.\/pages\/items['"]/);
     });
 
+    it('apps/web items page lists items via TanStack Query against the api-client (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // TanStack Query primitives
+      expect(page).toMatch(/useQuery/);
+      expect(page).toMatch(/useMutation/);
+      expect(page).toMatch(/useQueryClient/);
+      // Reaches the api through the typed api-client (no hardcoded fetch URLs)
+      expect(page).toMatch(/apiClient\.items\.\$get\(\)/);
+      expect(page).toMatch(/apiClient\.items\.\$post\(/);
+      // Discriminates ok vs not-ok response (Hono RPC client contract)
+      expect(page).toMatch(/res\.ok/);
+    });
+
+    it('apps/web items page invalidates the items query after a successful create (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // onSuccess on the create mutation calls invalidateQueries on ['items']
+      expect(page).toMatch(/onSuccess\s*:\s*[^}]*queryClient\.invalidateQueries/);
+      expect(page).toMatch(/queryKey\s*:\s*\[\s*['"]items['"]\s*\]/);
+    });
+
+    it('apps/web items page renders a name form with a submit button (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // A real <form> with a name input
+      expect(page).toMatch(/<form[\s>]/);
+      expect(page).toMatch(/<input[^>]*type=["']text["']/);
+      // A submit button
+      expect(page).toMatch(/<button[^>]*type=["']submit["']/);
+      // Form wires onSubmit to a handler (no <form onSubmit= omitted)
+      expect(page).toMatch(/onSubmit=\{handleSubmit\}/);
+    });
+
+    it('apps/web items page uses inferred types end-to-end (no any, no manual Item interface) (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // No `any` (the type discipline bar from the AC)
+      expect(page).not.toMatch(/:\s*any\b/);
+      // No manually-declared Item interface (the api-client is the source
+      // of truth). Look for the anti-pattern: `interface Item` or
+      // `type Item = {` (a literal) — but `type Item = Awaited<...>`
+      // is the inferred form, which is the right shape.
+      expect(page).not.toMatch(/interface\s+Item\b/);
+      expect(page).not.toMatch(/type\s+Item\s*=\s*\{/);
+      // The inferred-from-api-client form is present
+      expect(page).toMatch(/Awaited<ReturnType<typeof\s+fetchItems>>/);
+    });
+
+    it('apps/web items page is not auth-protected (issue 05; auth comes in 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // No auth check in the page body
+      expect(page).not.toMatch(/apiClient\.auth\./);
+      expect(page).not.toMatch(/useAuth/);
+      expect(page).not.toMatch(/navigate\(\s*['"]\/login['"]/);
+      // The router doesn't gate /items behind anything either
+      const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
+      expect(router).not.toMatch(/beforeLoad.*auth/);
+      expect(router).not.toMatch(/requireAuth/);
+    });
+
+    it('apps/web landing page links to /items (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
+      expect(page).toMatch(/to=["']\/items["']/);
+    });
+
     it('root Taskfile `dev` brings up both web and api shells', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
