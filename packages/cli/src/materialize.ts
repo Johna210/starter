@@ -523,8 +523,8 @@ function webIndexPage(): string {
   return `export function IndexPage() {
   return (
     <main style={{ padding: '2rem' }}>
-      <h1>Scaffolded app</h1>
-      <p>Hello from create-fs-starter. This page is intentionally empty.</p>
+      <h1>Starter — TS-monolith</h1>
+      <p>Web shell is up. api-client is wired in via <code>src/lib/api.ts</code>.</p>
     </main>
   );
 }

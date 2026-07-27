@@ -37,6 +37,15 @@ describe('materialize', () => {
       expect(src).toContain('main.tsx');
     });
 
+    it('apps/web landing page heading is "Starter — TS-monolith" (decision 15/24b)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
+      expect(page).toContain('Starter');
+      expect(page).toContain('TS-monolith');
+      // The "Scaffolded app" placeholder from the prefactor shell is gone.
+      expect(page).not.toMatch(/Scaffolded app/);
+    });
+
     it('writes the apps/api workspace (Hono shell)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const apiDir = join(targetDir, 'apps/api');
