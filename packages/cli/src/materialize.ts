@@ -14,6 +14,7 @@ import { type Composition, describeComposition, isImplemented } from './composit
 export type { ProjectContext } from './materialize/_shared.js';
 import { type ProjectContext, writeFileRecursive } from './materialize/_shared.js';
 import { writeRoot } from './materialize/root.js';
+import { writeShared } from './materialize/shared.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
@@ -83,10 +84,7 @@ async function writeTsMonolithVite(ctx: ProjectContext): Promise<void> {
   await writeFileRecursive(join(targetDir, 'apps/api/src/internal/auth/index.ts'), apiAuthIndexTs());
   await writeFileRecursive(join(targetDir, 'apps/api/src/internal/auth/auth.repo.test.ts'), apiAuthRepoTestTs());
 
-  // packages/shared — zod schemas + utils placeholder (empty for now)
-  await writeFileRecursive(join(targetDir, 'packages/shared/package.json'), sharedPackageJson());
-  await writeFileRecursive(join(targetDir, 'packages/shared/tsconfig.json'), sharedTsconfigJson());
-  await writeFileRecursive(join(targetDir, 'packages/shared/src/index.ts'), sharedIndexTs());
+  await writeShared(ctx);
 
   // packages/db — Drizzle + items schema + initial migration (decision 14)
   await writeFileRecursive(join(targetDir, 'packages/db/package.json'), dbPackageJson());
@@ -744,66 +742,6 @@ describeDb('makeDrizzleItemsRepo (real DB)', () => {
     expect(items[0]?.name).toBe('first');
   });
 });
-`;
-}
-
-// ---------- packages/shared templates -------------------------------------
-
-function sharedPackageJson(): string {
-  return JSON.stringify(
-    {
-      name: '@starter/shared',
-      version: '0.1.0',
-      private: true,
-      type: 'module',
-      main: './src/index.ts',
-      scripts: {
-        build: 'tsc -p tsconfig.build.json',
-        test: 'vitest run',
-        typecheck: 'tsc --noEmit',
-      },
-      dependencies: {
-        zod: '^3.23.0',
-      },
-      devDependencies: {
-        typescript: '^5.9.3',
-        vitest: '^4.1.10',
-      },
-    },
-    null,
-    2,
-  ) + '\n';
-}
-
-function sharedTsconfigJson(): string {
-  return JSON.stringify(
-    {
-      compilerOptions: {
-        target: 'ES2022',
-        module: 'ESNext',
-        moduleResolution: 'Bundler',
-        lib: ['ES2022'],
-        strict: true,
-        esModuleInterop: true,
-        resolveJsonModule: true,
-        skipLibCheck: true,
-        isolatedModules: true,
-        noEmit: true,
-        declaration: true,
-      },
-      include: ['src/**/*'],
-    },
-    null,
-    2,
-  ) + '\n';
-}
-
-function sharedIndexTs(): string {
-  return `// @starter/shared — zod schemas + pure utils shared by apps.
-// This package is empty for now; later tickets add the first zod
-// schemas (likely the \`items\` demo, decision 13).
-
-export {};
 `;
 }
 
