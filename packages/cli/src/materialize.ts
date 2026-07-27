@@ -7,16 +7,12 @@
 // Templates are kept as TS string constants (decision 25b: TS templates
 // can be imported as values / type-checked, not embedded as bytes).
 
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { type Composition, describeComposition, isImplemented } from './composition.js';
-
-export interface ProjectContext {
-  /** Absolute path to the (empty) target directory the scaffold is written into. */
-  targetDir: string;
-  /** npm package name for the scaffolded project. */
-  name: string;
-}
+// Re-exported to preserve the public API: external code imports
+// `ProjectContext` from '../src/materialize.js'.
+export type { ProjectContext } from './materialize/_shared.js';
+import { type ProjectContext, writeFileRecursive } from './materialize/_shared.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
@@ -36,13 +32,6 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   }
   // Today only one composition is implementable; future issues add more.
   await writeTsMonolithVite(ctx);
-}
-
-// ---------- helpers --------------------------------------------------------
-
-async function writeFileRecursive(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content, 'utf8');
 }
 
 // ---------- composition writers -------------------------------------------
