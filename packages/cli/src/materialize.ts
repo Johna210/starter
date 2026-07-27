@@ -63,11 +63,13 @@ async function writeTsMonolithVite(ctx: ProjectContext): Promise<void> {
   await writeFileRecursive(join(targetDir, 'apps/web/tsconfig.json'), webTsconfigJson());
   await writeFileRecursive(join(targetDir, 'apps/web/vite.config.ts'), webViteConfig());
   await writeFileRecursive(join(targetDir, 'apps/web/index.html'), webIndexHtml());
+  await writeFileRecursive(join(targetDir, 'apps/web/.env.example'), webEnvExample());
   await writeFileRecursive(join(targetDir, 'apps/web/src/main.tsx'), webMainTsx());
   await writeFileRecursive(join(targetDir, 'apps/web/src/app.css'), webAppCss());
   await writeFileRecursive(join(targetDir, 'apps/web/src/router.tsx'), webRouter());
   await writeFileRecursive(join(targetDir, 'apps/web/src/pages/index.tsx'), webIndexPage());
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/api.ts'), webLibApi());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/config.ts'), webConfigTs());
 
   // apps/api — Hono shell (no routes yet beyond /health)
   await writeFileRecursive(join(targetDir, 'apps/api/package.json'), apiPackageJson());
@@ -412,6 +414,7 @@ function webPackageJson(): string {
         '@tanstack/react-router': '^1.79.0',
         react: '^19.0.0',
         'react-dom': '^19.0.0',
+        zod: '^3.23.0',
       },
       devDependencies: {
         '@types/react': '^19.0.0',
@@ -523,8 +526,8 @@ function webIndexPage(): string {
   return `export function IndexPage() {
   return (
     <main style={{ padding: '2rem' }}>
-      <h1>Scaffolded app</h1>
-      <p>Hello from create-fs-starter. This page is intentionally empty.</p>
+      <h1>Starter — TS-monolith</h1>
+      <p>Web shell is up. api-client is wired in via <code>src/lib/api.ts</code>.</p>
     </main>
   );
 }
@@ -560,19 +563,71 @@ declare module '@tanstack/react-router' {
 function webLibApi(): string {
   return `// @starter/web — typed entry point to the api.
 //
-// Builds the apiClient (Hono RPC, decision 17/18) from a runtime-resolved
-// base URL and gives the rest of the app a single canonical import:
-// \`import { apiClient } from '@/lib/api'\`. Pages call
+// Builds the apiClient (Hono RPC, decision 17/18) from the runtime-resolved
+// base URL in ./config and gives the rest of the app a single canonical
+// import: \`import { apiClient } from '@/lib/api'\`. Pages call
 // \`apiClient.items.\$get()\` / \`\$post(...)\` and get end-to-end type
 // inference against apps/api/src/index.ts's Hono router. Auth integration
 // (issue 06) wraps this client to add transparent refresh-on-401
 // (decision 16).
 
 import { createApiClient } from '@starter/api-client';
+import { config } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+export const apiClient = createApiClient(config.apiUrl);
+`;
+}
 
-export const apiClient = createApiClient(API_URL);
+function webConfigTs(): string {
+  return `// @starter/web — typed config (decision 28).
+//
+// Reads VITE_API_URL (the api base URL) from Vite's import.meta.env and
+// validates it through a zod schema. The web app never reads
+// import.meta.env directly — everything goes through \`config\` so the
+// surface is one typed object, fail-fast on missing/invalid at boot.
+// Copy apps/web/.env.example to apps/web/.env for local dev.
+
+import { z } from 'zod';
+
+const configSchema = z.object({
+  apiUrl: z
+    .string()
+    .min(1, 'VITE_API_URL is required')
+    .url('VITE_API_URL must be a valid URL')
+    .default('http://localhost:3000'),
+});
+
+const parsed = configSchema.safeParse({
+  apiUrl: import.meta.env.VITE_API_URL,
+});
+
+if (!parsed.success) {
+  // Fail-fast on bad config so the user sees the error at boot, not at
+  // the first api call (decision 28).
+  throw new Error(
+    \`Invalid @starter/web config: \${parsed.error.issues
+      .map((i) => \`\${i.path.join('.')}: \${i.message}\`)
+      .join('; ')}\`,
+  );
+}
+
+export const config = parsed.data;
+export type Config = z.infer<typeof configSchema>;
+`;
+}
+
+function webEnvExample(): string {
+  return `# @starter/web — local dev env (git-ignored; copy to .env).
+#
+# Decision 28: dev loads vars via .env + Vite, prod uses the deploy
+# platform's real env vars (Vercel/Cloudflare/Fly inject them). Vite
+# picks up vars prefixed with VITE_ and exposes them on import.meta.env.
+# Code never reads import.meta.env directly — go through src/config.ts.
+
+# Base URL of the api (apps/api). Vite proxies /api to this in dev if
+# you wire it up in vite.config.ts; today the web calls the api
+# directly so the full URL is needed.
+VITE_API_URL=http://localhost:3000
 `;
 }
 
