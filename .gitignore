@@ -63,3 +63,4 @@ build/
 # Misc
 *.tgz
 .turbo/
+bin/
