@@ -91,6 +91,42 @@ describe('materialize', () => {
       expect(api).toContain('createApiClient');
     });
 
+    it('apps/web ships a zod-validated config.ts that reads VITE_API_URL (decision 28)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const cfg = await readFile(join(targetDir, 'apps/web/src/config.ts'), 'utf8');
+      // The config is a real zod schema, not a hand-rolled check
+      expect(cfg).toContain('zod');
+      // It declares the api URL field
+      expect(cfg).toMatch(/VITE_API_URL|apiUrl/i);
+      // It exports a typed `config` parsed from import.meta.env
+      expect(cfg).toContain('import.meta.env');
+      expect(cfg).toMatch(/export\s+const\s+config\b/);
+    });
+
+    it('apps/web/lib/api.ts reaches the api through the typed config (no direct env reads)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
+      // The lib imports the typed config
+      expect(api).toMatch(/from\s+['"]\.\.\/config['"]|from\s+['"]\.\/config['"]/);
+      // And uses config.apiUrl (not import.meta.env.VITE_API_URL directly)
+      expect(api).toContain('config.apiUrl');
+      expect(api).not.toMatch(/import\.meta\.env\.VITE_API_URL/);
+    });
+
+    it('apps/web ships a .env.example documenting VITE_API_URL', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const env = await readFile(join(targetDir, 'apps/web/.env.example'), 'utf8');
+      expect(env).toContain('VITE_API_URL');
+    });
+
+    it('apps/web/package.json declares zod as a runtime dep (config.ts depends on it)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'apps/web/package.json'), 'utf8'),
+      );
+      expect(pkg.dependencies.zod).toEqual(expect.any(String));
+    });
+
     it('writes the packages/auth workspace (passwords + tokens + refresh)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const authDir = join(targetDir, 'packages/auth');
