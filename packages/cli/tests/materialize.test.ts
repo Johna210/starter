@@ -208,6 +208,60 @@ describe('materialize', () => {
       expect(sql).toContain('"revoked_at"');
     });
 
+    it('writes the apps/api internal/auth module (repo + routes + middleware + index)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const authDir = join(targetDir, 'apps/api/src/internal/auth');
+      expect((await stat(authDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'auth.repo.ts',
+        'auth.repo.drizzle.ts',
+        'auth.routes.ts',
+        'auth.middleware.ts',
+        'index.ts',
+        'auth.repo.test.ts',
+      ]) {
+        expect((await stat(join(authDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('auth.routes.ts exposes register / login / refresh / logout endpoints', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const routes = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.routes.ts'),
+        'utf8',
+      );
+      for (const path of ['/register', '/login', '/refresh', '/logout']) {
+        expect(routes, `auth.routes should mount ${path}`).toContain(`'${path}'`);
+      }
+      expect(routes).toContain('hashPassword');
+      expect(routes).toContain('verifyPassword');
+      expect(routes).toContain('issueTokenPair');
+      expect(routes).toContain('rotateTokenPair');
+      expect(routes).toContain('revokeRefreshToken');
+    });
+
+    it('auth.middleware.ts exposes a verifyToken middleware factory', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const mw = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.middleware.ts'),
+        'utf8',
+      );
+      expect(mw).toContain('verifyToken');
+      expect(mw).toMatch(/requireAuth|verifyAuth/i);
+      expect(mw).toMatch(/401/);
+    });
+
+    it('auth.repo.drizzle.ts wires the Drizzle-backed UserStore + RefreshTokenStore', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const repo = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.repo.drizzle.ts'),
+        'utf8',
+      );
+      expect(repo).toContain('usersTable');
+      expect(repo).toContain('refreshTokensTable');
+      expect(repo).toMatch(/@starter\/db/);
+    });
+
     it('packages/db barrel re-exports usersTable and refreshTokensTable', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const idx = await readFile(join(targetDir, 'packages/db/src/index.ts'), 'utf8');
