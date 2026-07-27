@@ -146,6 +146,23 @@ describe('materialize', () => {
       expect(router).toContain('IndexPage');
     });
 
+    it('apps/web writes the items page file (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pagePath = join(targetDir, 'apps/web/src/pages/items.tsx');
+      expect((await stat(pagePath)).isFile(), 'items.tsx should exist').toBe(true);
+    });
+
+    it('apps/web router registers /items pointing at the items page (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
+      // /items is registered
+      expect(router).toContain("path: '/items'");
+      // and points at the items page component
+      expect(router).toContain('ItemsPage');
+      // the items page is imported (so the router can reference it)
+      expect(router).toMatch(/import\s*\{[^}]*ItemsPage[^}]*\}\s*from\s*['"]\.\/pages\/items['"]/);
+    });
+
     it('root Taskfile `dev` brings up both web and api shells', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
