@@ -82,6 +82,267 @@ describe('materialize', () => {
       expect(api).toContain('createApiClient');
     });
 
+    it('writes the packages/auth workspace (passwords + tokens + refresh)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const authDir = join(targetDir, 'packages/auth');
+      expect((await stat(authDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'package.json',
+        'tsconfig.json',
+        'src/index.ts',
+        'src/passwords.ts',
+        'src/tokens.ts',
+        'src/refresh.ts',
+        'src/config.ts',
+        'src/types.ts',
+        'src/passwords.test.ts',
+        'src/tokens.test.ts',
+        'src/refresh.test.ts',
+      ]) {
+        expect((await stat(join(authDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('packages/auth/package.json declares @starter/auth and the right deps', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'packages/auth/package.json'), 'utf8'),
+      );
+      expect(pkg.name).toBe('@starter/auth');
+      expect(pkg.dependencies['argon2']).toEqual(expect.any(String));
+      expect(pkg.dependencies['jose']).toEqual(expect.any(String));
+      expect(pkg.dependencies['zod']).toEqual(expect.any(String));
+    });
+
+    it('packages/auth passwords.ts uses argon2id with vetted library', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pw = await readFile(
+        join(targetDir, 'packages/auth/src/passwords.ts'),
+        'utf8',
+      );
+      expect(pw).toContain('hashPassword');
+      expect(pw).toContain('verifyPassword');
+      expect(pw).toMatch(/argon2id/);
+      expect(pw).toContain('argon2');
+    });
+
+    it('packages/auth tokens.ts uses jose and exposes signToken/verifyToken', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tk = await readFile(
+        join(targetDir, 'packages/auth/src/tokens.ts'),
+        'utf8',
+      );
+      expect(tk).toContain('signToken');
+      expect(tk).toContain('verifyToken');
+      expect(tk).toContain('jose');
+    });
+
+    it('packages/auth refresh.ts implements issueTokenPair + rotateTokenPair', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const rf = await readFile(
+        join(targetDir, 'packages/auth/src/refresh.ts'),
+        'utf8',
+      );
+      expect(rf).toContain('issueTokenPair');
+      expect(rf).toContain('rotateTokenPair');
+      expect(rf).toContain('TokenPair');
+    });
+
+    it('packages/auth exports the TokenPair type from the barrel', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(
+        join(targetDir, 'packages/auth/src/index.ts'),
+        'utf8',
+      );
+      expect(idx).toContain('TokenPair');
+      expect(idx).toContain('hashPassword');
+      expect(idx).toContain('verifyPassword');
+      expect(idx).toContain('signToken');
+      expect(idx).toContain('verifyToken');
+      expect(idx).toContain('issueTokenPair');
+      expect(idx).toContain('rotateTokenPair');
+    });
+
+    it('packages/db ships users and refresh_tokens schemas (auth tables)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const dbDir = join(targetDir, 'packages/db');
+      for (const file of [
+        'src/schema/users.ts',
+        'src/schema/refresh-tokens.ts',
+        'migrations/0001_users.sql',
+        'migrations/0002_refresh_tokens.sql',
+      ]) {
+        expect((await stat(join(dbDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+      // and the existing items schema/migrations still in place
+      expect((await stat(join(dbDir, 'src/schema/items.ts'))).isFile()).toBe(true);
+      expect((await stat(join(dbDir, 'migrations/0000_items.sql'))).isFile()).toBe(true);
+    });
+
+    it('users table has id, email (unique), passwordHash, createdAt', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const sql = await readFile(
+        join(targetDir, 'packages/db/migrations/0001_users.sql'),
+        'utf8',
+      );
+      expect(sql).toMatch(/CREATE TABLE/i);
+      expect(sql).toContain('"id"');
+      expect(sql).toContain('"email"');
+      expect(sql).toMatch(/UNIQUE/i);
+      expect(sql).toContain('"password_hash"');
+      expect(sql).toContain('"created_at"');
+    });
+
+    it('refresh_tokens table has id, user_id (FK), jti (unique), expires_at, revoked_at', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const sql = await readFile(
+        join(targetDir, 'packages/db/migrations/0002_refresh_tokens.sql'),
+        'utf8',
+      );
+      expect(sql).toMatch(/CREATE TABLE/i);
+      expect(sql).toContain('"id"');
+      expect(sql).toContain('"user_id"');
+      expect(sql).toContain('"jti"');
+      expect(sql).toMatch(/UNIQUE/i);
+      expect(sql).toContain('"expires_at"');
+      expect(sql).toContain('"revoked_at"');
+    });
+
+    it('writes the apps/api internal/auth module (repo + routes + middleware + index)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const authDir = join(targetDir, 'apps/api/src/internal/auth');
+      expect((await stat(authDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'auth.repo.ts',
+        'auth.repo.drizzle.ts',
+        'auth.routes.ts',
+        'auth.middleware.ts',
+        'index.ts',
+        'auth.repo.test.ts',
+      ]) {
+        expect((await stat(join(authDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('auth.routes.ts exposes register / login / refresh / logout endpoints', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const routes = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.routes.ts'),
+        'utf8',
+      );
+      for (const path of ['/register', '/login', '/refresh', '/logout']) {
+        expect(routes, `auth.routes should mount ${path}`).toContain(`'${path}'`);
+      }
+      expect(routes).toContain('hashPassword');
+      expect(routes).toContain('verifyPassword');
+      expect(routes).toContain('issueTokenPair');
+      expect(routes).toContain('rotateTokenPair');
+      expect(routes).toContain('revokeRefreshToken');
+    });
+
+    it('auth.middleware.ts exposes a verifyToken middleware factory', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const mw = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.middleware.ts'),
+        'utf8',
+      );
+      expect(mw).toContain('verifyToken');
+      expect(mw).toMatch(/requireAuth|verifyAuth/i);
+      expect(mw).toMatch(/401/);
+    });
+
+    it('root README documents the auth endpoints and the JWT_SECRET requirement', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      // Auth endpoints
+      expect(readme).toMatch(/\/auth\/register|\/auth\/login|register|login/i);
+      // JWT_SECRET requirement
+      expect(readme).toContain('JWT_SECRET');
+    });
+
+    it('root Taskfile declares test:auth target (auth shim unit tests)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      expect(tf).toContain('test:auth');
+      expect(tf).toContain('packages/auth');
+    });
+
+    it('scaffolded project ships docs/wire-it-in/auth.md (decision 30/31)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const wireItIn = join(targetDir, 'docs/wire-it-in/auth.md');
+      expect((await stat(wireItIn)).isFile(), 'docs/wire-it-in/auth.md should exist').toBe(true);
+      const md = await readFile(wireItIn, 'utf8');
+      // The five fences the issue calls out
+      for (const fence of ['email verif', 'password reset', 'MFA', 'OAuth', 'RBAC']) {
+        expect(md, `auth.md should mention ${fence}`).toMatch(new RegExp(fence, 'i'));
+      }
+      // And points at the auth shim as the seam
+      expect(md).toMatch(/@starter\/auth|seam|shim/i);
+    });
+
+    it('apps/api .env.example documents JWT_SECRET (sole minter, decision 11)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const env = await readFile(join(targetDir, 'apps/api/.env.example'), 'utf8');
+      expect(env).toContain('JWT_SECRET');
+      // optional TTLs should be documented too
+      expect(env).toMatch(/ACCESS_TOKEN_TTL|REFRESH_TOKEN_TTL/);
+    });
+
+    it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
+      // /auth is mounted (unprotected — register/login are public)
+      expect(idx).toMatch(/\.route\(\s*['"]\/auth['"]/);
+      // /items is protected: requireAuth middleware is applied
+      expect(idx).toContain('requireAuth');
+      // the items module is composed via makeItemsModule
+      expect(idx).toContain('makeItemsModule');
+      // auth module is composed via makeAuthModule
+      expect(idx).toContain('makeAuthModule');
+    });
+
+    it('auth.repo.drizzle.ts wires the Drizzle-backed UserStore + RefreshTokenStore', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const repo = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.repo.drizzle.ts'),
+        'utf8',
+      );
+      expect(repo).toContain('usersTable');
+      expect(repo).toContain('refreshTokensTable');
+      expect(repo).toMatch(/@starter\/db/);
+    });
+
+    it('packages/db barrel re-exports usersTable and refreshTokensTable', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(join(targetDir, 'packages/db/src/index.ts'), 'utf8');
+      expect(idx).toContain('usersTable');
+      expect(idx).toContain('refreshTokensTable');
+    });
+
+    it('packages/auth unit tests use real libraries (no mocks)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pwTest = await readFile(
+        join(targetDir, 'packages/auth/src/passwords.test.ts'),
+        'utf8',
+      );
+      const tkTest = await readFile(
+        join(targetDir, 'packages/auth/src/tokens.test.ts'),
+        'utf8',
+      );
+      const rfTest = await readFile(
+        join(targetDir, 'packages/auth/src/refresh.test.ts'),
+        'utf8',
+      );
+      // decision 22: real libraries, not mocks
+      expect(pwTest).not.toMatch(/vi\.mock/);
+      expect(tkTest).not.toMatch(/vi\.mock/);
+      expect(rfTest).not.toMatch(/vi\.mock/);
+      // each test file uses the actual library it's testing
+      expect(pwTest).toContain('hashPassword');
+      expect(tkTest).toContain('signToken');
+      expect(rfTest).toContain('issueTokenPair');
+    });
+
     it('writes the packages/api-client workspace (typed Hono RPC client)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const dir = join(targetDir, 'packages/api-client');
