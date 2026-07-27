@@ -146,6 +146,91 @@ describe('materialize', () => {
       expect(router).toContain('IndexPage');
     });
 
+    it('apps/web writes the items page file (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pagePath = join(targetDir, 'apps/web/src/pages/items.tsx');
+      expect((await stat(pagePath)).isFile(), 'items.tsx should exist').toBe(true);
+    });
+
+    it('apps/web router registers /items pointing at the items page (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
+      // /items is registered
+      expect(router).toContain("path: '/items'");
+      // and points at the items page component
+      expect(router).toContain('ItemsPage');
+      // the items page is imported (so the router can reference it)
+      expect(router).toMatch(/import\s*\{[^}]*ItemsPage[^}]*\}\s*from\s*['"]\.\/pages\/items['"]/);
+    });
+
+    it('apps/web items page lists items via TanStack Query against the api-client (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // TanStack Query primitives
+      expect(page).toMatch(/useQuery/);
+      expect(page).toMatch(/useMutation/);
+      expect(page).toMatch(/useQueryClient/);
+      // Reaches the api through the typed api-client (no hardcoded fetch URLs)
+      expect(page).toMatch(/apiClient\.items\.\$get\(\)/);
+      expect(page).toMatch(/apiClient\.items\.\$post\(/);
+      // Discriminates ok vs not-ok response (Hono RPC client contract)
+      expect(page).toMatch(/res\.ok/);
+    });
+
+    it('apps/web items page invalidates the items query after a successful create (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // onSuccess on the create mutation calls invalidateQueries on ['items']
+      expect(page).toMatch(/onSuccess\s*:\s*[^}]*queryClient\.invalidateQueries/);
+      expect(page).toMatch(/queryKey\s*:\s*\[\s*['"]items['"]\s*\]/);
+    });
+
+    it('apps/web items page renders a name form with a submit button (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // A real <form> with a name input
+      expect(page).toMatch(/<form[\s>]/);
+      expect(page).toMatch(/<input[^>]*type=["']text["']/);
+      // A submit button
+      expect(page).toMatch(/<button[^>]*type=["']submit["']/);
+      // Form wires onSubmit to a handler (no <form onSubmit= omitted)
+      expect(page).toMatch(/onSubmit=\{handleSubmit\}/);
+    });
+
+    it('apps/web items page uses inferred types end-to-end (no any, no manual Item interface) (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // No `any` (the type discipline bar from the AC)
+      expect(page).not.toMatch(/:\s*any\b/);
+      // No manually-declared Item interface (the api-client is the source
+      // of truth). Look for the anti-pattern: `interface Item` or
+      // `type Item = {` (a literal) — but `type Item = Awaited<...>`
+      // is the inferred form, which is the right shape.
+      expect(page).not.toMatch(/interface\s+Item\b/);
+      expect(page).not.toMatch(/type\s+Item\s*=\s*\{/);
+      // The inferred-from-api-client form is present
+      expect(page).toMatch(/Awaited<ReturnType<typeof\s+fetchItems>>/);
+    });
+
+    it('apps/web items page is not auth-protected (issue 05; auth comes in 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
+      // No auth check in the page body
+      expect(page).not.toMatch(/apiClient\.auth\./);
+      expect(page).not.toMatch(/useAuth/);
+      expect(page).not.toMatch(/navigate\(\s*['"]\/login['"]/);
+      // The router doesn't gate /items behind anything either
+      const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
+      expect(router).not.toMatch(/beforeLoad.*auth/);
+      expect(router).not.toMatch(/requireAuth/);
+    });
+
+    it('apps/web landing page links to /items (issue 05)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
+      expect(page).toMatch(/to=["']\/items["']/);
+    });
+
     it('root Taskfile `dev` brings up both web and api shells', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
@@ -159,15 +244,15 @@ describe('materialize', () => {
       expect(devBlock![0]).toMatch(/dev:api/);
     });
 
-    it('apps/web shell has no auth, no items integration (just the shell, issue #6)', async () => {
+    it('apps/web has no auth wiring yet (issue 06 adds it)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
-      // No actual auth calls wired into the web yet — that lives in issue 06
-      // (web-auth integration). We assert on real imports, not comments.
+      // The api-client wrapper doesn't make any auth calls yet — that lives
+      // in issue 06 (web-auth integration). The api-client stays
+      // runtime-agnostic; auth flows are wired in the page layer.
       const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
       expect(api).not.toMatch(/apiClient\.auth\.(login|register|refresh|logout)/);
-      // No items integration yet — that lives in issue 05.
+      // The index (landing) page is also auth-free — it just links to /items.
       const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
-      expect(page).not.toMatch(/apiClient\.items/);
       expect(page).not.toMatch(/apiClient\.auth/);
     });
 
@@ -377,7 +462,7 @@ describe('materialize', () => {
       expect(env).toMatch(/ACCESS_TOKEN_TTL|REFRESH_TOKEN_TTL/);
     });
 
-    it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth', async () => {
+    it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth (issue 06)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
       // /auth is mounted (unprotected — register/login are public)
@@ -388,6 +473,22 @@ describe('materialize', () => {
       expect(idx).toContain('makeItemsModule');
       // auth module is composed via makeAuthModule
       expect(idx).toContain('makeAuthModule');
+    });
+
+    it('apps/api buildApp opens /items without requireAuth (issue 05; re-protected in 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
+      // The items module is still mounted
+      expect(idx).toContain('makeItemsModule');
+      // ...at the /items prefix
+      expect(idx).toMatch(/\.route\(\s*['"]\/items['"]/);
+      // But it is NOT wrapped in a requireAuth-protected subtree:
+      // the comment in apps/api/src/index.ts calls this out, and
+      // there's no `protectedItems` (or similar) Hono() with
+      // .use('*', requireAuth(...)) followed by .route('/items', ...).
+      // (Issue 06 re-protects /items; this assertion will then need
+      // to be revisited.)
+      expect(idx).not.toMatch(/\.use\(\s*['"]\*['"]\s*,\s*requireAuth/);
     });
 
     it('auth.repo.drizzle.ts wires the Drizzle-backed UserStore + RefreshTokenStore', async () => {
@@ -495,7 +596,11 @@ describe('materialize', () => {
         'utf8',
       );
       expect(routes).toContain('Hono');
-      expect(routes).toMatch(/items\.(get|post)\(/);
+      // Chained style: .get(...) and .post(...) on the new Hono() builder,
+      // not const-then-mutate (which collapses the route schema; see
+      // type-inference note in the file).
+      expect(routes).toMatch(/\.get\(/);
+      expect(routes).toMatch(/\.post\(/);
       expect(routes).toContain('makeItemsRoutes');
     });
 

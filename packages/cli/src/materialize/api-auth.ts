@@ -158,6 +158,14 @@ function apiAuthRoutesTs(): string {
 // cookie + Bearer access token pattern. The mobile flow (ticket 12)
 // uses secure storage + body refresh. Both work off the same token
 // shape: this file is the single minting surface.
+//
+// Type-inference note: the routes are defined in a chained
+// \`new Hono().post(...).post(...)\` style rather than a
+// \`const r = new Hono(); r.post(...); r.post(...); return r;\` style.
+// Hono's per-route schema is preserved through the chained builder;
+// the const-then-mutate pattern collapses the function's return type
+// to the default \`Hono\`, which loses the route schema and breaks
+// the api-client's Hono RPC inference (issue 05 surfaced this).
 
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
@@ -202,65 +210,59 @@ export interface AuthRoutesDeps {
 export type AuthRoutes = ReturnType<typeof makeAuthRoutes>;
 
 export function makeAuthRoutes(deps: AuthRoutesDeps) {
-  const auth = new Hono();
-
-  // POST /auth/register \u2014 { email, password } \u2192 { userId }
-  auth.post('/register', zValidator('json', registerSchema), async (c) => {
-    const { email, password } = c.req.valid('json');
-    const existing = await deps.users.findByEmail(email);
-    if (existing) {
-      return c.json({ error: 'email already registered' }, 409);
-    }
-    const passwordHash = await hashPassword(password);
-    const user = await deps.users.create({ email, passwordHash });
-    return c.json({ userId: String(user.id) }, 201);
-  });
-
-  // POST /auth/login \u2014 { email, password } \u2192 { access, refresh, userId }
-  auth.post('/login', zValidator('json', loginSchema), async (c) => {
-    const { email, password } = c.req.valid('json');
-    const user = await deps.users.findByEmail(email);
-    if (!user) {
-      // Generic message \u2014 don't leak whether the email exists.
-      return c.json({ error: 'invalid credentials' }, 401);
-    }
-    const ok = await verifyPassword(user.passwordHash, password);
-    if (!ok) {
-      return c.json({ error: 'invalid credentials' }, 401);
-    }
-    const pair = await issueTokenPair(String(user.id), deps.config, deps.refreshTokens);
-    return c.json({ ...pair, userId: String(user.id) });
-  });
-
-  // POST /auth/refresh \u2014 { refresh } \u2192 { access, refresh } (rotation)
-  auth.post('/refresh', zValidator('json', refreshSchema), async (c) => {
-    const { refresh } = c.req.valid('json');
-    try {
-      const pair = await rotateTokenPair(refresh, deps.config, deps.refreshTokens);
-      return c.json(pair);
-    } catch (err) {
-      if (err instanceof InvalidRefreshTokenError || err instanceof InvalidTokenError) {
-        return c.json({ error: 'invalid refresh token' }, 401);
+  return new Hono()
+    // POST /auth/register \u2014 { email, password } \u2192 { userId }
+    .post('/register', zValidator('json', registerSchema), async (c) => {
+      const { email, password } = c.req.valid('json');
+      const existing = await deps.users.findByEmail(email);
+      if (existing) {
+        return c.json({ error: 'email already registered' }, 409);
       }
-      throw err;
-    }
-  });
-
-  // POST /auth/logout \u2014 { refresh } \u2192 { ok: true } (revoke the refresh)
-  auth.post('/logout', zValidator('json', logoutSchema), async (c) => {
-    const { refresh } = c.req.valid('json');
-    try {
-      await revokeRefreshToken(refresh, deps.config, deps.refreshTokens);
-    } catch (err) {
-      if (err instanceof InvalidTokenError) {
-        return c.json({ error: 'invalid refresh token' }, 401);
+      const passwordHash = await hashPassword(password);
+      const user = await deps.users.create({ email, passwordHash });
+      return c.json({ userId: String(user.id) }, 201);
+    })
+    // POST /auth/login \u2014 { email, password } \u2192 { access, refresh, userId }
+    .post('/login', zValidator('json', loginSchema), async (c) => {
+      const { email, password } = c.req.valid('json');
+      const user = await deps.users.findByEmail(email);
+      if (!user) {
+        // Generic message \u2014 don't leak whether the email exists.
+        return c.json({ error: 'invalid credentials' }, 401);
       }
-      throw err;
-    }
-    return c.json({ ok: true });
-  });
-
-  return auth;
+      const ok = await verifyPassword(user.passwordHash, password);
+      if (!ok) {
+        return c.json({ error: 'invalid credentials' }, 401);
+      }
+      const pair = await issueTokenPair(String(user.id), deps.config, deps.refreshTokens);
+      return c.json({ ...pair, userId: String(user.id) });
+    })
+    // POST /auth/refresh \u2014 { refresh } \u2192 { access, refresh } (rotation)
+    .post('/refresh', zValidator('json', refreshSchema), async (c) => {
+      const { refresh } = c.req.valid('json');
+      try {
+        const pair = await rotateTokenPair(refresh, deps.config, deps.refreshTokens);
+        return c.json(pair);
+      } catch (err) {
+        if (err instanceof InvalidRefreshTokenError || err instanceof InvalidTokenError) {
+          return c.json({ error: 'invalid refresh token' }, 401);
+        }
+        throw err;
+      }
+    })
+    // POST /auth/logout \u2014 { refresh } \u2192 { ok: true } (revoke the refresh)
+    .post('/logout', zValidator('json', logoutSchema), async (c) => {
+      const { refresh } = c.req.valid('json');
+      try {
+        await revokeRefreshToken(refresh, deps.config, deps.refreshTokens);
+      } catch (err) {
+        if (err instanceof InvalidTokenError) {
+          return c.json({ error: 'invalid refresh token' }, 401);
+        }
+        throw err;
+      }
+      return c.json({ ok: true });
+    });
 }
 `;
 }
