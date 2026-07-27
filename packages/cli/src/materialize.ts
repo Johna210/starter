@@ -210,6 +210,7 @@ tasks:
     cmds:
       - task: test:web
       - task: test:api
+      - task: test:auth
       - task: test:shared
       - task: test:db
 
@@ -220,6 +221,12 @@ tasks:
 
   test:api:
     dir: apps/api
+    cmds:
+      - pnpm test
+
+  test:auth:
+    desc: Run auth shim unit tests (real argon2 + jose, no mocks)
+    dir: packages/auth
     cmds:
       - pnpm test
 
@@ -294,10 +301,13 @@ A fullstack TypeScript monorepo scaffolded from
   the api through the typed \`api-client\` (see \`apps/web/src/lib/api.ts\`).
 - \`apps/api\` — Hono on Node, modular-monolith structure: each domain lives
   in \`apps/api/src/internal/<name>/\` with a typed interface, mounted at a
-  prefix. The \`items\` demo domain (decision 13) is wired end-to-end.
+  prefix. The \`items\` and \`auth\` modules are wired end-to-end.
 - \`packages/db\` — Drizzle + pg + zod. The TS schema is the single source
   of truth; \`drizzle-kit\` emits versioned SQL migrations into
   \`packages/db/migrations/\`.
+- \`packages/auth\` — the auth shim (decision 12): argon2id passwords,
+  jose-signed JWTs, refresh-token rotation. Thin typed layer over vetted
+  libraries; owns the surface, not the crypto.
 - \`packages/api-client\` — typed Hono RPC client (decision 17/18). The web
   (and later, mobile) reach the api through this client with end-to-end
   type inference; no codegen, no separate OpenAPI artifact.
@@ -306,12 +316,31 @@ A fullstack TypeScript monorepo scaffolded from
 ## The items demo (decision 13)
 
 The scaffold ships a single trivial domain, \`items\`, to prove the whole
-stack composes end-to-end on day one:
+stack composes end-to-end on day one. \`/items\` is **protected** —
+a valid Bearer access token is required on every request:
 
-- \`GET /items\` returns the list (Hono route → \`ItemsRepo.list()\` → Drizzle → Postgres).
+- \`GET /items\` returns the list (Hono route → \`requireAuth\` → \`ItemsRepo.list()\` → Drizzle → Postgres).
 - \`POST /items\` with \`{ "name": "..." }\` creates a row and returns it.
 
 It's a 5-minute delete when you start your real domain, not a refactor.
+
+## Auth (decision 12)
+
+Four public endpoints on the api, mounted at \`/auth/\`:
+
+- \`POST /auth/register\` — \`{ email, password }\` → \`{ userId }\` (201).
+- \`POST /auth/login\` — \`{ email, password }\` → \`{ access, refresh, userId }\`.
+- \`POST /auth/refresh\` — \`{ refresh }\` → \`{ access, refresh }\` (rotation; old refresh is revoked).
+- \`POST /auth/logout\` — \`{ refresh }\` → \`{ ok: true }\` (idempotent).
+
+\`apps/api\` is the **sole minter** of JWTs in this monorepo (decision 11):
+no other service reads \`JWT_SECRET\`. Generate one with
+\`openssl rand -base64 48\` and put it in \`apps/api/.env\`; the rest of
+the env contract is in \`apps/api/.env.example\`.
+
+The shim is intentionally narrow. Email verification, password reset,
+MFA, OAuth, and RBAC are explicitly *fences* (not features) — see
+\`docs/wire-it-in/auth.md\` for the seams.
 
 ## Quickstart
 
@@ -322,22 +351,25 @@ It's a 5-minute delete when you start your real domain, not a refactor.
 
 # 2. Bring up Postgres any way you like (docker, native, etc.) and set
 #    DATABASE_URL in apps/api/.env and packages/db/.env.
+# 3. Set JWT_SECRET in apps/api/.env (openssl rand -base64 48).
 
-# 3. Install deps, apply migrations, and boot the stack.
+# 4. Install deps, apply migrations, and boot the stack.
 pnpm install
 task migrate
 task dev
 \`\`\`
 
 The web app boots on http://localhost:5173 and the api on
-http://localhost:3000.
+http://localhost:3000. \`/auth/login\` is the easiest way to mint a
+token for ad-hoc testing of the protected \`/items\` routes.
 
 ## Tasks
 
 | Task | What it does |
 |------|--------------|
 | \`task dev\` | Boot web + api in parallel |
-| \`task test\` | Run all workspace tests (skips items repo test if \`DATABASE_URL\` is unset) |
+| \`task test\` | Run all workspace tests (skips items-repo test if \`DATABASE_URL\` is unset) |
+| \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
 | \`task migrate\` | Apply pending DB migrations |
 | \`task db:generate\` | Generate a new migration from the Drizzle schema |
 | \`task build\` | Build all workspaces |
@@ -347,8 +379,11 @@ http://localhost:3000.
 - **Add an api domain**: \`apps/api/src/internal/<name>/\` with
   \`<name>.repo.ts\` (interface) + \`<name>.routes.ts\` (Hono) +
   \`index.ts\` (mountable module); mount it in \`apps/api/src/index.ts\`.
+  Behind \`requireAuth\` if it needs an authenticated principal.
 - **Add a db table**: edit \`packages/db/src/schema/\`, then
   \`task db:generate\` to emit a migration, then \`task migrate\`.
+- **Wire a fence from the auth shim** (email-verify, password reset,
+  MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
 - **Add a web page**: create a route in \`apps/web/src/pages/\` and
   register it in \`apps/web/src/router.tsx\`; reach the api through
   \`apiClient\` (re-exported from \`apps/web/src/lib/api\`).

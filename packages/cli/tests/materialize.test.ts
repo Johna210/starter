@@ -251,6 +251,22 @@ describe('materialize', () => {
       expect(mw).toMatch(/401/);
     });
 
+    it('root README documents the auth endpoints and the JWT_SECRET requirement', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      // Auth endpoints
+      expect(readme).toMatch(/\/auth\/register|\/auth\/login|register|login/i);
+      // JWT_SECRET requirement
+      expect(readme).toContain('JWT_SECRET');
+    });
+
+    it('root Taskfile declares test:auth target (auth shim unit tests)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      expect(tf).toContain('test:auth');
+      expect(tf).toContain('packages/auth');
+    });
+
     it('scaffolded project ships docs/wire-it-in/auth.md (decision 30/31)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const wireItIn = join(targetDir, 'docs/wire-it-in/auth.md');
