@@ -291,6 +291,14 @@ function apiItemsRoutesTs(): string {
 // route handler is parameterized by the repo (decision 27: explicit
 // interface). The route handlers depend on \`ItemsRepo\`, not on Drizzle —
 // the route can be unit-tested by passing a stub repo.
+//
+// Type-inference note: the routes are defined in a chained
+// \`new Hono().get(...).post(...)\` style rather than a
+// \`const r = new Hono(); r.get(...); r.post(...); return r;\` style.
+// Hono's per-route schema is preserved through the chained builder;
+// the const-then-mutate pattern collapses the function's return type
+// to the default \`Hono\`, which loses the route schema and breaks
+// the api-client's Hono RPC inference (issue 05 surfaced this).
 
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
@@ -304,21 +312,17 @@ const createItemSchema = z.object({
 export type ItemsRoutes = ReturnType<typeof makeItemsRoutes>;
 
 export function makeItemsRoutes(repo: ItemsRepo) {
-  const items = new Hono();
-
-  items.get('/', async (c) => {
-    const list = await repo.list();
-    return c.json(list);
-  });
-
-  items.post('/', zValidator('json', createItemSchema), async (c) => {
-    const body = c.req.valid('json');
-    const input: CreateItemInput = { name: body.name };
-    const item = await repo.create(input);
-    return c.json(item, 201);
-  });
-
-  return items;
+  return new Hono()
+    .get('/', async (c) => {
+      const list = await repo.list();
+      return c.json(list);
+    })
+    .post('/', zValidator('json', createItemSchema), async (c) => {
+      const body = c.req.valid('json');
+      const input: CreateItemInput = { name: body.name };
+      const item = await repo.create(input);
+      return c.json(item, 201);
+    });
 }
 `;
 }

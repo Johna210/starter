@@ -596,7 +596,11 @@ describe('materialize', () => {
         'utf8',
       );
       expect(routes).toContain('Hono');
-      expect(routes).toMatch(/items\.(get|post)\(/);
+      // Chained style: .get(...) and .post(...) on the new Hono() builder,
+      // not const-then-mutate (which collapses the route schema; see
+      // type-inference note in the file).
+      expect(routes).toMatch(/\.get\(/);
+      expect(routes).toMatch(/\.post\(/);
       expect(routes).toContain('makeItemsRoutes');
     });
 
