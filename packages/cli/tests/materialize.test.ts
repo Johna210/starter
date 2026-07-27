@@ -82,6 +82,111 @@ describe('materialize', () => {
       expect(api).toContain('createApiClient');
     });
 
+    it('writes the packages/auth workspace (passwords + tokens + refresh)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const authDir = join(targetDir, 'packages/auth');
+      expect((await stat(authDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'package.json',
+        'tsconfig.json',
+        'src/index.ts',
+        'src/passwords.ts',
+        'src/tokens.ts',
+        'src/refresh.ts',
+        'src/config.ts',
+        'src/types.ts',
+        'src/passwords.test.ts',
+        'src/tokens.test.ts',
+        'src/refresh.test.ts',
+      ]) {
+        expect((await stat(join(authDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('packages/auth/package.json declares @starter/auth and the right deps', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'packages/auth/package.json'), 'utf8'),
+      );
+      expect(pkg.name).toBe('@starter/auth');
+      expect(pkg.dependencies['argon2']).toEqual(expect.any(String));
+      expect(pkg.dependencies['jose']).toEqual(expect.any(String));
+      expect(pkg.dependencies['zod']).toEqual(expect.any(String));
+    });
+
+    it('packages/auth passwords.ts uses argon2id with vetted library', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pw = await readFile(
+        join(targetDir, 'packages/auth/src/passwords.ts'),
+        'utf8',
+      );
+      expect(pw).toContain('hashPassword');
+      expect(pw).toContain('verifyPassword');
+      expect(pw).toMatch(/argon2id/);
+      expect(pw).toContain('argon2');
+    });
+
+    it('packages/auth tokens.ts uses jose and exposes signToken/verifyToken', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tk = await readFile(
+        join(targetDir, 'packages/auth/src/tokens.ts'),
+        'utf8',
+      );
+      expect(tk).toContain('signToken');
+      expect(tk).toContain('verifyToken');
+      expect(tk).toContain('jose');
+    });
+
+    it('packages/auth refresh.ts implements issueTokenPair + rotateTokenPair', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const rf = await readFile(
+        join(targetDir, 'packages/auth/src/refresh.ts'),
+        'utf8',
+      );
+      expect(rf).toContain('issueTokenPair');
+      expect(rf).toContain('rotateTokenPair');
+      expect(rf).toContain('TokenPair');
+    });
+
+    it('packages/auth exports the TokenPair type from the barrel', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(
+        join(targetDir, 'packages/auth/src/index.ts'),
+        'utf8',
+      );
+      expect(idx).toContain('TokenPair');
+      expect(idx).toContain('hashPassword');
+      expect(idx).toContain('verifyPassword');
+      expect(idx).toContain('signToken');
+      expect(idx).toContain('verifyToken');
+      expect(idx).toContain('issueTokenPair');
+      expect(idx).toContain('rotateTokenPair');
+    });
+
+    it('packages/auth unit tests use real libraries (no mocks)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pwTest = await readFile(
+        join(targetDir, 'packages/auth/src/passwords.test.ts'),
+        'utf8',
+      );
+      const tkTest = await readFile(
+        join(targetDir, 'packages/auth/src/tokens.test.ts'),
+        'utf8',
+      );
+      const rfTest = await readFile(
+        join(targetDir, 'packages/auth/src/refresh.test.ts'),
+        'utf8',
+      );
+      // decision 22: real libraries, not mocks
+      expect(pwTest).not.toMatch(/vi\.mock/);
+      expect(tkTest).not.toMatch(/vi\.mock/);
+      expect(rfTest).not.toMatch(/vi\.mock/);
+      // each test file uses the actual library it's testing
+      expect(pwTest).toContain('hashPassword');
+      expect(tkTest).toContain('signToken');
+      expect(rfTest).toContain('issueTokenPair');
+    });
+
     it('writes the packages/api-client workspace (typed Hono RPC client)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const dir = join(targetDir, 'packages/api-client');
