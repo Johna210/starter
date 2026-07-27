@@ -163,6 +163,58 @@ describe('materialize', () => {
       expect(idx).toContain('rotateTokenPair');
     });
 
+    it('packages/db ships users and refresh_tokens schemas (auth tables)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const dbDir = join(targetDir, 'packages/db');
+      for (const file of [
+        'src/schema/users.ts',
+        'src/schema/refresh-tokens.ts',
+        'migrations/0001_users.sql',
+        'migrations/0002_refresh_tokens.sql',
+      ]) {
+        expect((await stat(join(dbDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+      // and the existing items schema/migrations still in place
+      expect((await stat(join(dbDir, 'src/schema/items.ts'))).isFile()).toBe(true);
+      expect((await stat(join(dbDir, 'migrations/0000_items.sql'))).isFile()).toBe(true);
+    });
+
+    it('users table has id, email (unique), passwordHash, createdAt', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const sql = await readFile(
+        join(targetDir, 'packages/db/migrations/0001_users.sql'),
+        'utf8',
+      );
+      expect(sql).toMatch(/CREATE TABLE/i);
+      expect(sql).toContain('"id"');
+      expect(sql).toContain('"email"');
+      expect(sql).toMatch(/UNIQUE/i);
+      expect(sql).toContain('"password_hash"');
+      expect(sql).toContain('"created_at"');
+    });
+
+    it('refresh_tokens table has id, user_id (FK), jti (unique), expires_at, revoked_at', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const sql = await readFile(
+        join(targetDir, 'packages/db/migrations/0002_refresh_tokens.sql'),
+        'utf8',
+      );
+      expect(sql).toMatch(/CREATE TABLE/i);
+      expect(sql).toContain('"id"');
+      expect(sql).toContain('"user_id"');
+      expect(sql).toContain('"jti"');
+      expect(sql).toMatch(/UNIQUE/i);
+      expect(sql).toContain('"expires_at"');
+      expect(sql).toContain('"revoked_at"');
+    });
+
+    it('packages/db barrel re-exports usersTable and refreshTokensTable', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(join(targetDir, 'packages/db/src/index.ts'), 'utf8');
+      expect(idx).toContain('usersTable');
+      expect(idx).toContain('refreshTokensTable');
+    });
+
     it('packages/auth unit tests use real libraries (no mocks)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const pwTest = await readFile(

@@ -96,7 +96,17 @@ async function writeTsMonolithVite(ctx: ProjectContext): Promise<void> {
   await writeFileRecursive(join(targetDir, 'packages/db/src/config.ts'), dbConfigTs());
   await writeFileRecursive(join(targetDir, 'packages/db/src/client.ts'), dbClientTs());
   await writeFileRecursive(join(targetDir, 'packages/db/src/schema/items.ts'), dbSchemaItemsTs());
+  await writeFileRecursive(join(targetDir, 'packages/db/src/schema/users.ts'), dbSchemaUsersTs());
+  await writeFileRecursive(
+    join(targetDir, 'packages/db/src/schema/refresh-tokens.ts'),
+    dbSchemaRefreshTokensTs(),
+  );
   await writeFileRecursive(join(targetDir, 'packages/db/migrations/0000_items.sql'), dbMigration0000());
+  await writeFileRecursive(join(targetDir, 'packages/db/migrations/0001_users.sql'), dbMigration0001());
+  await writeFileRecursive(
+    join(targetDir, 'packages/db/migrations/0002_refresh_tokens.sql'),
+    dbMigration0002(),
+  );
 
   // packages/api-client — typed Hono RPC client for web/api/mobile (decision 17/18)
   await writeFileRecursive(join(targetDir, 'packages/api-client/package.json'), apiClientPackageJson());
@@ -992,7 +1002,7 @@ export default defineConfig({
 }
 
 function dbIndexTs(): string {
-  return `// @starter/db — Drizzle client + items schema barrel.
+  return `// @starter/db — Drizzle client + schema barrel.
 //
 // The Drizzle TS schema is the single source of truth (decision 14):
 //   drizzle-kit generate -> emits a versioned SQL migration into ./migrations/
@@ -1012,6 +1022,8 @@ function dbIndexTs(): string {
 export { databaseUrlSchema, readDatabaseConfig } from './config.js';
 export { getDb, getPool, __resetForTests, type DbClient, type GetDbOptions, type GetPoolOptions } from './client.js';
 export { itemsTable, type Item, type NewItem } from './schema/items.js';
+export { usersTable, type User, type NewUser } from './schema/users.js';
+export { refreshTokensTable, type RefreshTokenRow, type NewRefreshTokenRow } from './schema/refresh-tokens.js';
 `;
 }
 
@@ -1127,6 +1139,98 @@ function dbMigration0000(): string {
   "name" varchar(256) NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+`;
+}
+
+function dbSchemaUsersTs(): string {
+  return `// @starter/db — users schema (auth shim, decision 12).
+//
+// One row per registered user. The password hash is an argon2id PHC
+// string produced by \`@starter/auth.hashPassword\`; this schema holds
+// the hash, the auth shim owns the hashing/verification.
+
+import { integer, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+
+export const usersTable = pgTable(
+  'users',
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    email: text().notNull(),
+    passwordHash: text('password_hash').notNull(),
+    createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    emailIdx: uniqueIndex('users_email_idx').on(t.email),
+  }),
+);
+
+export type User = typeof usersTable.$inferSelect;
+export type NewUser = typeof usersTable.$inferInsert;
+`;
+}
+
+function dbSchemaRefreshTokensTs(): string {
+  return `// @starter/db — refresh tokens schema (auth shim, decision 12).
+//
+// Each issued refresh token has a record here, identified by its \`jti\`.
+// The auth shim's rotation algorithm (issue / rotate / revoke) reads
+// and writes these rows. Storing refresh tokens DB-side (rather than
+// just trusting the JWT contents) is what makes revocation real:
+// revoking a token means flipping \`revoked_at\` on its row.
+
+import { integer, pgTable, text, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { usersTable } from './users.js';
+
+export const refreshTokensTable = pgTable(
+  'refresh_tokens',
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    jti: text().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    jtiIdx: uniqueIndex('refresh_tokens_jti_idx').on(t.jti),
+    userIdx: index('refresh_tokens_user_idx').on(t.userId),
+  }),
+);
+
+export type RefreshTokenRow = typeof refreshTokensTable.$inferSelect;
+export type NewRefreshTokenRow = typeof refreshTokensTable.$inferInsert;
+`;
+}
+
+function dbMigration0001(): string {
+  return `CREATE TABLE IF NOT EXISTS "users" (
+  "id" integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "users_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 CACHE 1),
+  "email" text NOT NULL,
+  "password_hash" text NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_idx" ON "users" ("email");
+`;
+}
+
+function dbMigration0002(): string {
+  return `CREATE TABLE IF NOT EXISTS "refresh_tokens" (
+  "id" integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "refresh_tokens_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 CACHE 1),
+  "user_id" integer NOT NULL,
+  "jti" text NOT NULL,
+  "expires_at" timestamp with time zone NOT NULL,
+  "revoked_at" timestamp with time zone,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "refresh_tokens_jti_idx" ON "refresh_tokens" ("jti");
+CREATE INDEX IF NOT EXISTS "refresh_tokens_user_idx" ON "refresh_tokens" ("user_id");
+DO $$ BEGIN
+  ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 `;
 }
 
