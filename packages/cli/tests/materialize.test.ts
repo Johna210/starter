@@ -251,6 +251,19 @@ describe('materialize', () => {
       expect(mw).toMatch(/401/);
     });
 
+    it('scaffolded project ships docs/wire-it-in/auth.md (decision 30/31)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const wireItIn = join(targetDir, 'docs/wire-it-in/auth.md');
+      expect((await stat(wireItIn)).isFile(), 'docs/wire-it-in/auth.md should exist').toBe(true);
+      const md = await readFile(wireItIn, 'utf8');
+      // The five fences the issue calls out
+      for (const fence of ['email verif', 'password reset', 'MFA', 'OAuth', 'RBAC']) {
+        expect(md, `auth.md should mention ${fence}`).toMatch(new RegExp(fence, 'i'));
+      }
+      // And points at the auth shim as the seam
+      expect(md).toMatch(/@starter\/auth|seam|shim/i);
+    });
+
     it('apps/api .env.example documents JWT_SECRET (sole minter, decision 11)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const env = await readFile(join(targetDir, 'apps/api/.env.example'), 'utf8');
