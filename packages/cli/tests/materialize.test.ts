@@ -127,6 +127,50 @@ describe('materialize', () => {
       expect(pkg.dependencies.zod).toEqual(expect.any(String));
     });
 
+    it('apps/web main.tsx wires up TanStack Router + TanStack Query providers', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const main = await readFile(join(targetDir, 'apps/web/src/main.tsx'), 'utf8');
+      // TanStack Router provider
+      expect(main).toContain('RouterProvider');
+      expect(main).toContain('@tanstack/react-router');
+      // TanStack Query client + provider
+      expect(main).toContain('QueryClient');
+      expect(main).toContain('QueryClientProvider');
+      expect(main).toContain('@tanstack/react-query');
+    });
+
+    it('apps/web has a / route registered (the landing page)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
+      expect(router).toContain("path: '/'");
+      expect(router).toContain('IndexPage');
+    });
+
+    it('root Taskfile `dev` brings up both web and api shells', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      // dev:web and dev:api both exist
+      expect(tf).toMatch(/^  dev:web:/m);
+      expect(tf).toMatch(/^  dev:api:/m);
+      // The `dev` task references both
+      const devBlock = tf.match(/^  dev:\n(?:    .+\n)+/m);
+      expect(devBlock, 'dev: task should exist').toBeTruthy();
+      expect(devBlock![0]).toMatch(/dev:web/);
+      expect(devBlock![0]).toMatch(/dev:api/);
+    });
+
+    it('apps/web shell has no auth, no items integration (just the shell, issue #6)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // No actual auth calls wired into the web yet — that lives in issue 06
+      // (web-auth integration). We assert on real imports, not comments.
+      const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
+      expect(api).not.toMatch(/apiClient\.auth\.(login|register|refresh|logout)/);
+      // No items integration yet — that lives in issue 05.
+      const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
+      expect(page).not.toMatch(/apiClient\.items/);
+      expect(page).not.toMatch(/apiClient\.auth/);
+    });
+
     it('writes the packages/auth workspace (passwords + tokens + refresh)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const authDir = join(targetDir, 'packages/auth');
