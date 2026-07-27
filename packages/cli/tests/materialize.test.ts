@@ -377,7 +377,7 @@ describe('materialize', () => {
       expect(env).toMatch(/ACCESS_TOKEN_TTL|REFRESH_TOKEN_TTL/);
     });
 
-    it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth', async () => {
+    it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth (issue 06)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
       // /auth is mounted (unprotected — register/login are public)
@@ -388,6 +388,22 @@ describe('materialize', () => {
       expect(idx).toContain('makeItemsModule');
       // auth module is composed via makeAuthModule
       expect(idx).toContain('makeAuthModule');
+    });
+
+    it('apps/api buildApp opens /items without requireAuth (issue 05; re-protected in 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
+      // The items module is still mounted
+      expect(idx).toContain('makeItemsModule');
+      // ...at the /items prefix
+      expect(idx).toMatch(/\.route\(\s*['"]\/items['"]/);
+      // But it is NOT wrapped in a requireAuth-protected subtree:
+      // the comment in apps/api/src/index.ts calls this out, and
+      // there's no `protectedItems` (or similar) Hono() with
+      // .use('*', requireAuth(...)) followed by .route('/items', ...).
+      // (Issue 06 re-protects /items; this assertion will then need
+      // to be revisited.)
+      expect(idx).not.toMatch(/\.use\(\s*['"]\*['"]\s*,\s*requireAuth/);
     });
 
     it('auth.repo.drizzle.ts wires the Drizzle-backed UserStore + RefreshTokenStore', async () => {
