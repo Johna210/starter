@@ -170,33 +170,29 @@ function apiIndexTs(): string {
 //
 // Auth wiring (decision 12):
 // - /auth is mounted *unprotected* — register/login are public.
-// - /items is mounted *behind* requireAuth (decision 12: every
-//   authenticated request carries a Bearer access token; rotation
-//   happens on /refresh, not per-request).
+// - /items is currently mounted *unprotected* so the items page
+//   (issue 05) is reachable without auth. Issue 06 wraps the /items
+//   subtree in \`requireAuth\` and adds the login flow on the web.
 // - Sole-minter invariant (decision 11): only this process reads
 //   JWT_SECRET; the auth shim receives it via the AuthConfig we pass
-//   down to makeAuthModule() and requireAuth().
+//   down to makeAuthModule() and (in issue 06) requireAuth().
 
 import { Hono } from 'hono';
 import { readAuthConfig } from '@starter/auth';
 import { makeItemsModule } from './internal/items/index.js';
-import { makeAuthModule, requireAuth } from './internal/auth/index.js';
+import { makeAuthModule } from './internal/auth/index.js';
 
 export function buildApp() {
   const authConfig = readAuthConfig();
   const auth = makeAuthModule(authConfig);
 
-  // Subtree: /items is authenticated. Anything else at the root is
-  // also caught by requireAuth; if you add an unprotected route, mount
-  // it at the root *before* this protected subtree.
-  const protectedItems = new Hono();
-  protectedItems.use('*', requireAuth(authConfig));
-  protectedItems.route('/items', makeItemsModule());
-
+  // /items is currently open (issue 05) so the items page demo is
+  // reachable without auth. Issue 06 wraps this in a protected
+  // subtree (requireAuth) and re-routes /items through it.
   return new Hono()
     .get('/health', (c) => c.json({ status: 'ok' }))
     .route('/auth', auth)
-    .route('/', protectedItems);
+    .route('/items', makeItemsModule());
 }
 
 export type AppType = ReturnType<typeof buildApp>;
