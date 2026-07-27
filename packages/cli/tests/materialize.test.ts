@@ -244,15 +244,15 @@ describe('materialize', () => {
       expect(devBlock![0]).toMatch(/dev:api/);
     });
 
-    it('apps/web shell has no auth, no items integration (just the shell, issue #6)', async () => {
+    it('apps/web has no auth wiring yet (issue 06 adds it)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
-      // No actual auth calls wired into the web yet — that lives in issue 06
-      // (web-auth integration). We assert on real imports, not comments.
+      // The api-client wrapper doesn't make any auth calls yet — that lives
+      // in issue 06 (web-auth integration). The api-client stays
+      // runtime-agnostic; auth flows are wired in the page layer.
       const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
       expect(api).not.toMatch(/apiClient\.auth\.(login|register|refresh|logout)/);
-      // No items integration yet — that lives in issue 05.
+      // The index (landing) page is also auth-free — it just links to /items.
       const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
-      expect(page).not.toMatch(/apiClient\.items/);
       expect(page).not.toMatch(/apiClient\.auth/);
     });
 
