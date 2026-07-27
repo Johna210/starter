@@ -608,6 +608,21 @@ function apiEnvExample(): string {
 # DATABASE_URL — Postgres connection string; consumed via @starter/db's
 # zod schema (decision 14: the schema is owned by packages/db, the env
 # is read in each consuming workspace).
+#
+# JWT_SECRET — HS256 signing secret for access + refresh tokens
+# (decision 11: apps/api is the SOLE MINTER in shape 1; no other
+# service in this monorepo should set this var). Must be at least
+# 32 chars (256 bits). Rotate by adding a new entry to a JWKS or
+# key-set (out of scope for the starter; see docs/wire-it-in/auth.md).
+# Generate a fresh one with: openssl rand -base64 48
+JWT_SECRET=replace-me-with-a-32-plus-char-random-secret
+
+# Optional: token TTLs in seconds. Defaults: access 900 (15 min),
+# refresh 2_592_000 (30 days). Decision 16: short-lived access,
+# longer-lived refresh; the refresh rotation (/auth/refresh) issues
+# a new pair on every successful call.
+# ACCESS_TOKEN_TTL=900
+# REFRESH_TOKEN_TTL=2592000
 
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter

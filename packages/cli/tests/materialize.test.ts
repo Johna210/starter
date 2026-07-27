@@ -251,6 +251,14 @@ describe('materialize', () => {
       expect(mw).toMatch(/401/);
     });
 
+    it('apps/api .env.example documents JWT_SECRET (sole minter, decision 11)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const env = await readFile(join(targetDir, 'apps/api/.env.example'), 'utf8');
+      expect(env).toContain('JWT_SECRET');
+      // optional TTLs should be documented too
+      expect(env).toMatch(/ACCESS_TOKEN_TTL|REFRESH_TOKEN_TTL/);
+    });
+
     it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
