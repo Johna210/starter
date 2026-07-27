@@ -664,14 +664,36 @@ function apiIndexTs(): string {
 // buildApp() is called at server startup, not at import time. This
 // means type-only imports of this file (e.g. from the api-client) are
 // cheap: no env parsing, no Postgres connection.
+//
+// Auth wiring (decision 12):
+// - /auth is mounted *unprotected* — register/login are public.
+// - /items is mounted *behind* requireAuth (decision 12: every
+//   authenticated request carries a Bearer access token; rotation
+//   happens on /refresh, not per-request).
+// - Sole-minter invariant (decision 11): only this process reads
+//   JWT_SECRET; the auth shim receives it via the AuthConfig we pass
+//   down to makeAuthModule() and requireAuth().
 
 import { Hono } from 'hono';
+import { readAuthConfig } from '@starter/auth';
 import { makeItemsModule } from './internal/items/index.js';
+import { makeAuthModule, requireAuth } from './internal/auth/index.js';
 
 export function buildApp() {
+  const authConfig = readAuthConfig();
+  const auth = makeAuthModule(authConfig);
+
+  // Subtree: /items is authenticated. Anything else at the root is
+  // also caught by requireAuth; if you add an unprotected route, mount
+  // it at the root *before* this protected subtree.
+  const protectedItems = new Hono();
+  protectedItems.use('*', requireAuth(authConfig));
+  protectedItems.route('/items', makeItemsModule());
+
   return new Hono()
     .get('/health', (c) => c.json({ status: 'ok' }))
-    .route('/items', makeItemsModule());
+    .route('/auth', auth)
+    .route('/', protectedItems);
 }
 
 export type AppType = ReturnType<typeof buildApp>;
@@ -2197,8 +2219,9 @@ function apiAuthIndexTs(): string {
 //
 // Wires the Drizzle-backed UserStore + RefreshTokenStore to the route
 // factory and exports a Hono router ready to mount at /auth. The
-// consumer (apps/api/src/index.ts) just calls \`buildApp().route('/auth',
-// makeAuthModule())\` \u2014 the module owns its own composition.
+// consumer (apps/api/src/index.ts) calls \`buildApp().route('/auth',
+// makeAuthModule(authConfig))\` \u2014 the auth config is read once at
+// buildApp() and threaded through, so we don't parse JWT_SECRET twice.
 //
 // makeAuthModule() builds the router on demand, so importing this file
 // is cheap: no Postgres connection is opened at import time, and a
@@ -2206,14 +2229,13 @@ function apiAuthIndexTs(): string {
 // api startup), not at type-only import.
 
 import { getDb } from '@starter/db';
-import { readAuthConfig, type AuthConfig } from '@starter/auth';
+import type { AuthConfig } from '@starter/auth';
 import { loadConfig } from '../../config.js';
 import { makeDrizzleUserStore, makeDrizzleRefreshTokenStore } from './auth.repo.drizzle.js';
 import { makeAuthRoutes } from './auth.routes.js';
 
-export function makeAuthModule() {
+export function makeAuthModule(authConfig: AuthConfig) {
   const { databaseUrl } = loadConfig();
-  const authConfig: AuthConfig = readAuthConfig();
   const db = getDb({ connectionString: databaseUrl });
   const users = makeDrizzleUserStore(db);
   const refreshTokens = makeDrizzleRefreshTokenStore(db);

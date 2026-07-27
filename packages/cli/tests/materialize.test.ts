@@ -251,6 +251,19 @@ describe('materialize', () => {
       expect(mw).toMatch(/401/);
     });
 
+    it('apps/api buildApp mounts the auth module at /auth and protects /items with requireAuth', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
+      // /auth is mounted (unprotected — register/login are public)
+      expect(idx).toMatch(/\.route\(\s*['"]\/auth['"]/);
+      // /items is protected: requireAuth middleware is applied
+      expect(idx).toContain('requireAuth');
+      // the items module is composed via makeItemsModule
+      expect(idx).toContain('makeItemsModule');
+      // auth module is composed via makeAuthModule
+      expect(idx).toContain('makeAuthModule');
+    });
+
     it('auth.repo.drizzle.ts wires the Drizzle-backed UserStore + RefreshTokenStore', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const repo = await readFile(
