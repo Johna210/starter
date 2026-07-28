@@ -79,14 +79,21 @@ function apiClientIndexTs(): string {
 // The base URL is provided by the consumer — web reads it from Vite env,
 // mobile reads it from app config, tests pass a localhost URL. The
 // api-client itself stays runtime-agnostic (no vite/client types).
+//
+// Optional \`Hono RPC options\` (a \`fetch\` override, headers, etc.) are
+// forwarded to \`hc()\` so the web can plug in a Bearer-attaching,
+// refresh-on-401 fetch without forking the api-client (issue 06).
 
-import { hc } from 'hono/client';
+import { hc, type ClientRequestOptions } from 'hono/client';
 import type { AppType } from '@starter/api';
 
 export type ApiClient = ReturnType<typeof hc<AppType>>;
 
-export function createApiClient(baseUrl: string): ApiClient {
-  return hc<AppType>(baseUrl);
+export function createApiClient(
+  baseUrl: string,
+  options?: ClientRequestOptions,
+): ApiClient {
+  return hc<AppType>(baseUrl, options);
 }
 
 export type { AppType } from '@starter/api';

@@ -200,10 +200,10 @@ It's a 5-minute delete when you start your real domain, not a refactor.
 
 Four public endpoints on the api, mounted at \`/auth/\`:
 
-- \`POST /auth/register\` — \`{ email, password }\` → \`{ userId }\` (201).
-- \`POST /auth/login\` — \`{ email, password }\` → \`{ access, refresh, userId }\`.
-- \`POST /auth/refresh\` — \`{ refresh }\` → \`{ access, refresh }\` (rotation; old refresh is revoked).
-- \`POST /auth/logout\` — \`{ refresh }\` → \`{ ok: true }\` (idempotent).
+- \`POST /auth/register\` — \`{ email, password }\` → \`{ access, refresh, userId }\` (201). Sets an httpOnly refresh cookie.
+- \`POST /auth/login\` — \`{ email, password }\` → \`{ access, refresh, userId }\`. Sets an httpOnly refresh cookie.
+- \`POST /auth/refresh\` — accepts the refresh via the httpOnly cookie (web) or \`{ refresh }\` in the body (mobile) → \`{ access, refresh }\` (rotation; old refresh is revoked). Sets a new httpOnly cookie on the web path.
+- \`POST /auth/logout\` — same dual-channel \`refresh\` lookup → \`{ ok: true }\` (idempotent). Clears the httpOnly cookie on the web path.
 
 \`apps/api\` is the **sole minter** of JWTs in this monorepo (decision 11):
 no other service reads \`JWT_SECRET\`. Generate one with
@@ -232,8 +232,10 @@ task dev
 \`\`\`
 
 The web app boots on http://localhost:5173 and the api on
-http://localhost:3000. \`/auth/login\` is the easiest way to mint a
-token for ad-hoc testing of the protected \`/items\` routes.
+http://localhost:3000. Vite proxies \`/api\` to the api, so the web
+talks to the api over a same-origin path (the httpOnly refresh cookie
+is always first-party). Try it: open http://localhost:5173, click
+**Sign in**, register an account, and you land on the items page.
 
 ## Tasks
 

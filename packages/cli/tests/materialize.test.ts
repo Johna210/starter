@@ -212,17 +212,100 @@ describe('materialize', () => {
       expect(page).toMatch(/Awaited<ReturnType<typeof\s+fetchItems>>/);
     });
 
-    it('apps/web items page is not auth-protected (issue 05; auth comes in 06)', async () => {
+    it('apps/web items page is auth-protected (issue 06; redirects to /login when unauthenticated)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const page = await readFile(join(targetDir, 'apps/web/src/pages/items.tsx'), 'utf8');
-      // No auth check in the page body
-      expect(page).not.toMatch(/apiClient\.auth\./);
-      expect(page).not.toMatch(/useAuth/);
-      expect(page).not.toMatch(/navigate\(\s*['"]\/login['"]/);
-      // The router doesn't gate /items behind anything either
+      // The page checks authentication and redirects to /login
+      expect(page).toMatch(/useAuth/);
+      expect(page).toMatch(/navigate\(\s*\{\s*to\s*:\s*['"]\/login['"]/);
+      // The router also gates /items (defense in depth: route guard
+      // before the page renders, so a hard refresh doesn't flash the
+      // page first)
       const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
-      expect(router).not.toMatch(/beforeLoad.*auth/);
-      expect(router).not.toMatch(/requireAuth/);
+      expect(router).toMatch(/beforeLoad.*auth/);
+      expect(router).toMatch(/requireAuth/);
+    });
+
+    it('apps/web has a /login page that POSTs to /auth/login (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pagePath = join(targetDir, 'apps/web/src/pages/login.tsx');
+      expect((await stat(pagePath)).isFile(), 'login.tsx should exist').toBe(true);
+      const page = await readFile(pagePath, 'utf8');
+      // The page uses the auth hook to sign in (the hook is the seam
+      // between the page and the api-client — the page doesn't reach
+      // the api directly).
+      expect(page).toMatch(/useAuth/);
+      // It has a real <form> with email + password inputs and a submit
+      expect(page).toMatch(/<form[\s>]/);
+      expect(page).toMatch(/<input[^>]*type=["']email["']/);
+      expect(page).toMatch(/<input[^>]*type=["']password["']/);
+      expect(page).toMatch(/<button[^>]*type=["']submit["']/);
+      // After login it navigates to /items
+      expect(page).toMatch(/navigate\(\s*\{\s*to\s*:\s*['"]\/items['"]/);
+    });
+
+    it('apps/web auth hook wraps the api-client (login/logout flow) (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // The auth hook is the seam that calls apiClient.auth.login +
+      // apiClient.auth.logout (the typed Hono RPC auth surface from
+      // apps/api). Pages don't call apiClient.auth.* directly; they
+      // call useAuth().signIn / signOut.
+      const auth = await readFile(join(targetDir, 'apps/web/src/auth.tsx'), 'utf8');
+      expect(auth).toMatch(/apiClient\.auth\.login/);
+      expect(auth).toMatch(/apiClient\.auth\.logout/);
+    });
+
+    it('apps/web router registers /login pointing at the login page (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const router = await readFile(join(targetDir, 'apps/web/src/router.tsx'), 'utf8');
+      expect(router).toContain("path: '/login'");
+      expect(router).toContain('LoginPage');
+      expect(router).toMatch(/import\s*\{[^}]*LoginPage[^}]*\}\s*from\s*['"]\.\/pages\/login['"]/);
+    });
+
+    it('apps/web has an auth hook (AuthProvider + useAuth) that stores the access token in memory (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const authPath = join(targetDir, 'apps/web/src/auth.tsx');
+      expect((await stat(authPath)).isFile(), 'auth.tsx should exist').toBe(true);
+      const auth = await readFile(authPath, 'utf8');
+      // Exports the AuthProvider and the useAuth hook
+      expect(auth).toContain('AuthProvider');
+      expect(auth).toMatch(/export\s+function\s+useAuth/);
+      // Stores the access token in memory (useState or useSyncExternalStore),
+      // NOT in localStorage / sessionStorage (the SPA storage model is
+      // decision 16: in-memory access, httpOnly cookie for the refresh).
+      expect(auth).toMatch(/useState|useSyncExternalStore/);
+      expect(auth).not.toMatch(/localStorage/);
+      expect(auth).not.toMatch(/sessionStorage/);
+      // Exposes a signIn() that takes credentials and a signOut()
+      expect(auth).toMatch(/signIn/);
+      expect(auth).toMatch(/signOut/);
+    });
+
+    it('apps/web main.tsx wraps the app in the AuthProvider (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const main = await readFile(join(targetDir, 'apps/web/src/main.tsx'), 'utf8');
+      // The AuthProvider is imported and wraps the RouterProvider
+      expect(main).toContain('AuthProvider');
+      expect(main).toMatch(/AuthProvider>[\s\S]*RouterProvider/);
+    });
+
+    it('apps/web/lib/api.ts attaches a Bearer access token and refreshes on 401 (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
+      // The wrapper reaches the api through the api-client (typed)
+      expect(api).toMatch(/createApiClient/);
+      // It attaches the access token as a Bearer header
+      expect(api).toMatch(/Authorization/);
+      expect(api).toMatch(/Bearer/);
+      // It handles refresh-on-401
+      expect(api).toMatch(/refresh/);
+      // The api-client is the typed Hono RPC client; the auth surface
+      // is reached through apiClient.auth.* in the auth hook
+      // (src/auth.tsx), not directly in lib/api.ts — lib/api.ts is
+      // the transport wrapper, auth.tsx is the auth surface.
+      const auth = await readFile(join(targetDir, 'apps/web/src/auth.tsx'), 'utf8');
+      expect(auth).toMatch(/apiClient\.auth\.(login|register|refresh|logout)/);
     });
 
     it('apps/web landing page links to /items (issue 05)', async () => {
@@ -244,16 +327,15 @@ describe('materialize', () => {
       expect(devBlock![0]).toMatch(/dev:api/);
     });
 
-    it('apps/web has no auth wiring yet (issue 06 adds it)', async () => {
+    it('apps/web has auth wiring (issue 06)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
-      // The api-client wrapper doesn't make any auth calls yet — that lives
-      // in issue 06 (web-auth integration). The api-client stays
-      // runtime-agnostic; auth flows are wired in the page layer.
+      // The auth hook is the seam that calls the typed api-client's
+      // auth surface (apiClient.auth.login, apiClient.auth.logout).
+      const auth = await readFile(join(targetDir, 'apps/web/src/auth.tsx'), 'utf8');
+      expect(auth).toMatch(/apiClient\.auth\.(login|register|refresh|logout)/);
+      // The api-client wrapper does Bearer + refresh-on-401.
       const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
-      expect(api).not.toMatch(/apiClient\.auth\.(login|register|refresh|logout)/);
-      // The index (landing) page is also auth-free — it just links to /items.
-      const page = await readFile(join(targetDir, 'apps/web/src/pages/index.tsx'), 'utf8');
-      expect(page).not.toMatch(/apiClient\.auth/);
+      expect(api).toContain('@starter/api-client');
     });
 
     it('writes the packages/auth workspace (passwords + tokens + refresh)', async () => {
@@ -414,6 +496,32 @@ describe('materialize', () => {
       expect(routes).toContain('revokeRefreshToken');
     });
 
+    it('auth.routes.ts sets an httpOnly refresh cookie on login + register (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const routes = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.routes.ts'),
+        'utf8',
+      );
+      // The cookie helper (setRefreshCookie) is imported and used.
+      expect(routes).toMatch(/setRefreshCookie/);
+      // The cookie attributes include httpOnly (and path=/, the usual pair).
+      expect(routes).toMatch(/httpOnly/i);
+      // /refresh reads the cookie via getCookie as a fallback when the
+      // request doesn't carry a body { refresh }.
+      expect(routes).toMatch(/getCookie/);
+    });
+
+    it('auth.routes.ts declares the refresh-cookie name as a single constant (issue 06)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const routes = await readFile(
+        join(targetDir, 'apps/api/src/internal/auth/auth.routes.ts'),
+        'utf8',
+      );
+      // The cookie name lives in one place — a named constant the
+      // login/register/refresh/logout routes all share.
+      expect(routes).toMatch(/REFRESH_COOKIE_NAME/);
+    });
+
     it('auth.middleware.ts exposes a verifyToken middleware factory', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const mw = await readFile(
@@ -475,20 +583,16 @@ describe('materialize', () => {
       expect(idx).toContain('makeAuthModule');
     });
 
-    it('apps/api buildApp opens /items without requireAuth (issue 05; re-protected in 06)', async () => {
+    it('apps/api buildApp applies requireAuth to /items (issue 06; /items is now protected)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
       // The items module is still mounted
       expect(idx).toContain('makeItemsModule');
       // ...at the /items prefix
       expect(idx).toMatch(/\.route\(\s*['"]\/items['"]/);
-      // But it is NOT wrapped in a requireAuth-protected subtree:
-      // the comment in apps/api/src/index.ts calls this out, and
-      // there's no `protectedItems` (or similar) Hono() with
-      // .use('*', requireAuth(...)) followed by .route('/items', ...).
-      // (Issue 06 re-protects /items; this assertion will then need
-      // to be revisited.)
-      expect(idx).not.toMatch(/\.use\(\s*['"]\*['"]\s*,\s*requireAuth/);
+      // ...wrapped in a requireAuth-protected subtree: there IS a Hono()
+      // with .use('*', requireAuth(...)) followed by .route('/items', ...).
+      expect(idx).toMatch(/\.use\(\s*['"]\*['"]\s*,\s*requireAuth/);
     });
 
     it('auth.repo.drizzle.ts wires the Drizzle-backed UserStore + RefreshTokenStore', async () => {

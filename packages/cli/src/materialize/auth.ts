@@ -154,8 +154,8 @@ export const authConfigSchema = z.object({
     .min(32, 'JWT_SECRET must be at least 32 characters (256 bits)'),
   /** Access token TTL in seconds. Default 15 min (decision 16: short-lived). */
   accessTokenTtl: z.coerce.number().int().positive().default(900),
-  /** Refresh token TTL in seconds. Default 30 days. */
-  refreshTokenTtl: z.coerce.number().int().positive().default(2_592_000),
+  /** Refresh token TTL in seconds. Default 7 days. */
+  refreshTokenTtl: z.coerce.number().int().positive().default(604_800),
 });
 
 export type AuthConfig = z.infer<typeof authConfigSchema>;

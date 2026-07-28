@@ -106,11 +106,11 @@ function apiEnvExample(): string {
 JWT_SECRET=replace-me-with-a-32-plus-char-random-secret
 
 # Optional: token TTLs in seconds. Defaults: access 900 (15 min),
-# refresh 2_592_000 (30 days). Decision 16: short-lived access,
+# refresh 604_800 (7 days). Decision 16: short-lived access,
 # longer-lived refresh; the refresh rotation (/auth/refresh) issues
 # a new pair on every successful call.
 # ACCESS_TOKEN_TTL=900
-# REFRESH_TOKEN_TTL=2592000
+# REFRESH_TOKEN_TTL=604800
 
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter
@@ -168,31 +168,38 @@ function apiIndexTs(): string {
 // means type-only imports of this file (e.g. from the api-client) are
 // cheap: no env parsing, no Postgres connection.
 //
-// Auth wiring (decision 12):
+// Auth wiring (decision 12, 16):
 // - /auth is mounted *unprotected* — register/login are public.
-// - /items is currently mounted *unprotected* so the items page
-//   (issue 05) is reachable without auth. Issue 06 wraps the /items
-//   subtree in \`requireAuth\` and adds the login flow on the web.
+// - /items is wrapped in a \`requireAuth\`-protected subtree (issue 06):
+//   every request to /items must carry a valid Bearer access token,
+//   else 401. The protected subtree is its own Hono() with
+//   \`.use('*', requireAuth(authConfig))\` so the items module itself
+//   stays auth-agnostic (it just sees a verified userId on the context).
 // - Sole-minter invariant (decision 11): only this process reads
 //   JWT_SECRET; the auth shim receives it via the AuthConfig we pass
-//   down to makeAuthModule() and (in issue 06) requireAuth().
+//   down to makeAuthModule() and requireAuth().
 
 import { Hono } from 'hono';
 import { readAuthConfig } from '@starter/auth';
 import { makeItemsModule } from './internal/items/index.js';
-import { makeAuthModule } from './internal/auth/index.js';
+import { makeAuthModule, requireAuth } from './internal/auth/index.js';
 
 export function buildApp() {
   const authConfig = readAuthConfig();
   const auth = makeAuthModule(authConfig);
 
-  // /items is currently open (issue 05) so the items page demo is
-  // reachable without auth. Issue 06 wraps this in a protected
-  // subtree (requireAuth) and re-routes /items through it.
+  // /items is now protected (issue 06). The protected subtree is its
+  // own Hono so the \`.use('*', requireAuth(...))\` middleware fires
+  // on every /items request without leaking into the rest of the app.
+  // Chained (not const-then-mutate) so Hono RPC type inference flows
+  // end-to-end into the api-client.
   return new Hono()
     .get('/health', (c) => c.json({ status: 'ok' }))
     .route('/auth', auth)
-    .route('/items', makeItemsModule());
+    .route(
+      '/items',
+      new Hono().use('*', requireAuth(authConfig)).route('/', makeItemsModule()),
+    );
 }
 
 export type AppType = ReturnType<typeof buildApp>;

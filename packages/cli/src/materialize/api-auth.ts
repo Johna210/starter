@@ -154,10 +154,13 @@ function apiAuthRoutesTs(): string {
 // is 401 with a generic \`{ error }\` body \u2014 we don't leak whether
 // the email exists (login) or which field was wrong (register).
 //
-// Auth integration on the web (ticket 06) plugs in the httpOnly refresh
-// cookie + Bearer access token pattern. The mobile flow (ticket 12)
-// uses secure storage + body refresh. Both work off the same token
-// shape: this file is the single minting surface.
+// Web-auth flow (decision 16, issue 06): login + register set the
+// refresh token in an **httpOnly cookie** and return both tokens in
+// the response body. The cookie is the durable, XSS-safe channel
+// (browser sends it automatically on /auth/refresh); the body is what
+// the SPA's api-client stores in memory as the access token. The
+// mobile flow (issue 12) just doesn't use the cookie \u2014 the body
+// tokens alone are enough for secure storage + body-refresh.
 //
 // Type-inference note: the routes are defined in a chained
 // \`new Hono().post(...).post(...)\` style rather than a
@@ -168,6 +171,8 @@ function apiAuthRoutesTs(): string {
 // the api-client's Hono RPC inference (issue 05 surfaced this).
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import {
@@ -193,13 +198,42 @@ const loginSchema = z.object({
   password: z.string().min(1).max(256),
 });
 
-const refreshSchema = z.object({
-  refresh: z.string().min(1),
-});
+/**
+ * The single source of truth for the refresh-cookie name. Web +
+ * api-client read it implicitly by name; the route file owns it so
+ * the api-client can hard-code the same string in its refresh-on-401
+ * logic (or, in a future ticket, read it from a contract endpoint).
+ */
+export const REFRESH_COOKIE_NAME = 'starter_refresh';
 
-const logoutSchema = z.object({
-  refresh: z.string().min(1),
-});
+/** Set the httpOnly refresh cookie on the response. */
+function setRefreshCookie(c: Context, refreshToken: string, config: AuthConfig): void {
+  setCookie(c, REFRESH_COOKIE_NAME, refreshToken, {
+    httpOnly: true,
+    // \`lax\` is the right default for a top-level nav: it sends on same-site
+    // top-level navigations (the typical login flow) but blocks cross-site
+    // POSTs. Strict would be safer for a banking app; lax is the web-auth
+    // (decision 16) default.
+    sameSite: 'Lax',
+    path: '/',
+    // The refresh TTL is the cookie's hard ceiling. Aligns with the
+    // JWT \`exp\` so an attacker who steals the cookie at second N
+    // still has at most (expiresAt - now) to use it.
+    maxAge: config.refreshTokenTtl,
+    // The starter scaffolds http (localhost dev). In production,
+    // flip this to true \u2014 the cookie is already httpOnly + sameSite
+    // so the only missing piece is transport security.
+    secure: false,
+  });
+}
+
+/** Read the refresh token from the httpOnly cookie, falling back to body. */
+function readRefreshToken(c: Context, body: { refresh?: unknown }): string | null {
+  const fromCookie = getCookie(c, REFRESH_COOKIE_NAME);
+  if (fromCookie) return fromCookie;
+  if (typeof body?.refresh === 'string' && body.refresh.length > 0) return body.refresh;
+  return null;
+}
 
 export interface AuthRoutesDeps {
   users: UserStore;
@@ -211,7 +245,7 @@ export type AuthRoutes = ReturnType<typeof makeAuthRoutes>;
 
 export function makeAuthRoutes(deps: AuthRoutesDeps) {
   return new Hono()
-    // POST /auth/register \u2014 { email, password } \u2192 { userId }
+    // POST /auth/register \u2014 { email, password } \u2192 { access, refresh, userId } (201)
     .post('/register', zValidator('json', registerSchema), async (c) => {
       const { email, password } = c.req.valid('json');
       const existing = await deps.users.findByEmail(email);
@@ -220,9 +254,11 @@ export function makeAuthRoutes(deps: AuthRoutesDeps) {
       }
       const passwordHash = await hashPassword(password);
       const user = await deps.users.create({ email, passwordHash });
-      return c.json({ userId: String(user.id) }, 201);
+      const pair = await issueTokenPair(String(user.id), deps.config, deps.refreshTokens);
+      setRefreshCookie(c, pair.refresh, deps.config);
+      return c.json({ access: pair.access, refresh: pair.refresh, userId: String(user.id) }, 201);
     })
-    // POST /auth/login \u2014 { email, password } \u2192 { access, refresh, userId }
+    // POST /auth/login \u2014 { email, password } \u2192 { access, refresh, userId } + httpOnly cookie
     .post('/login', zValidator('json', loginSchema), async (c) => {
       const { email, password } = c.req.valid('json');
       const user = await deps.users.findByEmail(email);
@@ -235,14 +271,23 @@ export function makeAuthRoutes(deps: AuthRoutesDeps) {
         return c.json({ error: 'invalid credentials' }, 401);
       }
       const pair = await issueTokenPair(String(user.id), deps.config, deps.refreshTokens);
-      return c.json({ ...pair, userId: String(user.id) });
+      setRefreshCookie(c, pair.refresh, deps.config);
+      return c.json({ access: pair.access, refresh: pair.refresh, userId: String(user.id) });
     })
-    // POST /auth/refresh \u2014 { refresh } \u2192 { access, refresh } (rotation)
-    .post('/refresh', zValidator('json', refreshSchema), async (c) => {
-      const { refresh } = c.req.valid('json');
+    // POST /auth/refresh \u2014 cookie (web) OR body (mobile) \u2192 { access, refresh } + new cookie
+    .post('/refresh', async (c) => {
+      // Read the body if present; the cookie path doesn't need a body.
+      // \`safeJson\` swallows malformed JSON (returns 400) \u2014 for
+      // /refresh, the cookie fallback means an empty body is fine.
+      const body = (await c.req.json().catch(() => ({}))) as { refresh?: string };
+      const refresh = readRefreshToken(c, body);
+      if (!refresh) {
+        return c.json({ error: 'missing refresh token' }, 401);
+      }
       try {
         const pair = await rotateTokenPair(refresh, deps.config, deps.refreshTokens);
-        return c.json(pair);
+        setRefreshCookie(c, pair.refresh, deps.config);
+        return c.json({ access: pair.access, refresh: pair.refresh });
       } catch (err) {
         if (err instanceof InvalidRefreshTokenError || err instanceof InvalidTokenError) {
           return c.json({ error: 'invalid refresh token' }, 401);
@@ -250,17 +295,22 @@ export function makeAuthRoutes(deps: AuthRoutesDeps) {
         throw err;
       }
     })
-    // POST /auth/logout \u2014 { refresh } \u2192 { ok: true } (revoke the refresh)
-    .post('/logout', zValidator('json', logoutSchema), async (c) => {
-      const { refresh } = c.req.valid('json');
-      try {
-        await revokeRefreshToken(refresh, deps.config, deps.refreshTokens);
-      } catch (err) {
-        if (err instanceof InvalidTokenError) {
-          return c.json({ error: 'invalid refresh token' }, 401);
+    // POST /auth/logout \u2014 cookie (web) OR body (mobile) \u2192 { ok: true } (revoke the refresh + clear cookie)
+    .post('/logout', async (c) => {
+      const body = (await c.req.json().catch(() => ({}))) as { refresh?: string };
+      const refresh = readRefreshToken(c, body);
+      if (refresh) {
+        try {
+          await revokeRefreshToken(refresh, deps.config, deps.refreshTokens);
+        } catch (err) {
+          if (!(err instanceof InvalidTokenError)) throw err;
+          // Invalid/expired refresh is fine on logout \u2014 we just
+          // report success (idempotent) and clear the cookie.
         }
-        throw err;
       }
+      // Clear the cookie. Setting maxAge=0 instructs the browser to
+      // remove it immediately.
+      setCookie(c, REFRESH_COOKIE_NAME, '', { httpOnly: true, sameSite: 'Lax', path: '/', maxAge: 0 });
       return c.json({ ok: true });
     });
 }
