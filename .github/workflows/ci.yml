@@ -52,6 +52,7 @@ jobs:
 
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/starter
+      JWT_SECRET: ci-test-secret-do-not-use-in-production
       NODE_OPTIONS: --max-old-space-size=4096
 
     steps:
