@@ -95,10 +95,15 @@ jobs:
       - name: Scaffolded project — unit tests
         run: |
           # Continue past workspaces with no test files (vitest exits 1).
+          # Only fail if a workspace has tests that actually fail.
           FAILED=0
-          for task in test:web test:api test:auth test:shared test:db; do
-            echo "::group::$task"
-            task "$task" || FAILED=1
+          for ws in apps/web apps/api packages/auth packages/shared packages/db; do
+            echo "::group::test $ws"
+            if ls "$ws"/src/**/*.test.{ts,tsx,js,jsx} >/dev/null 2>&1; then
+              (cd "$ws" && pnpm test) || FAILED=1
+            else
+              echo "No test files — skipping"
+            fi
             echo "::endgroup::"
           done
           exit $FAILED
