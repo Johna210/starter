@@ -31,7 +31,14 @@ function rootPackageJson(name: string): string {
       scripts: {
         dev: 'task dev',
         test: 'task test',
+        'test:e2e': 'playwright test',
         build: 'task build',
+      },
+      devDependencies: {
+        // The one E2E (decision 22): lives at the project root
+        // (e2e/items-flow.spec.ts), driven by Playwright. Per-feature
+        // E2Es are the user's job — see docs/test-strategy.md.
+        '@playwright/test': '^1.48.0',
       },
     },
     null,
@@ -78,13 +85,14 @@ tasks:
       - pnpm dev
 
   test:
-    desc: Run all tests
+    desc: Run all tests (unit + contract + the one E2E)
     cmds:
       - task: test:web
       - task: test:api
       - task: test:auth
       - task: test:shared
       - task: test:db
+      - task: test:e2e
 
   test:web:
     dir: apps/web
@@ -112,6 +120,11 @@ tasks:
     dir: packages/db
     cmds:
       - pnpm test
+
+  test:e2e:
+    desc: Run the one E2E (items flow). Requires DATABASE_URL + task migrate.
+    cmds:
+      - pnpm test:e2e
 
   migrate:
     desc: Apply pending DB migrations (DATABASE_URL must be set)
@@ -242,11 +255,21 @@ is always first-party). Try it: open http://localhost:5173, click
 | Task | What it does |
 |------|--------------|
 | \`task dev\` | Boot web + api in parallel |
-| \`task test\` | Run all workspace tests (skips items-repo test if \`DATABASE_URL\` is unset) |
+| \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
+| \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
 | \`task migrate\` | Apply pending DB migrations |
 | \`task db:generate\` | Generate a new migration from the Drizzle schema |
 | \`task build\` | Build all workspaces |
+
+## Tests — the one-E2E-only discipline (decision 22)
+
+The scaffold ships exactly one end-to-end test, \`e2e/items-flow.spec.ts\`,
+which drives the web→api→db composition through a real browser (Playwright).
+It boots the stack via \`task dev\`, logs in, creates an item via the form,
+and asserts the item persists across a page reload. This is the **only** E2E
+the starter owns — per-feature E2Es are your job. The full rulebook is in
+[\`docs/test-strategy.md\`](docs/test-strategy.md).
 
 ## Where to extend
 

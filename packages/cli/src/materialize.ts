@@ -24,6 +24,7 @@ import { writeAuth } from './materialize/auth.js';
 import { writeApi } from './materialize/api.js';
 import { writeApiAuth } from './materialize/api-auth.js';
 import { writeDocs } from './materialize/docs.js';
+import { writeE2e } from './materialize/e2e.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
@@ -60,4 +61,9 @@ async function writeTsMonolithVite(ctx: ProjectContext): Promise<void> {
   await writeApiClient(ctx);
   await writeAuth(ctx);
   await writeDocs(ctx);
+  // E2E lives at the project root (it spans web + api + db), not
+  // inside a single workspace. Issued last so the workspaces it
+  // depends on are already written; the docs file in writeE2e
+  // extends /docs/ beyond the wire-it-in fences writeDocs owns.
+  await writeE2e(ctx);
 }
