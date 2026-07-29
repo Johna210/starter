@@ -581,6 +581,121 @@ describe('materialize', () => {
       expect(md).toMatch(/@starter\/auth|seam|shim/i);
     });
 
+    it('docs/architecture/contract-spine.md has a Mermaid diagram labeled "your Hono RPC contract spine" (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/architecture/contract-spine.md'), 'utf8');
+      // Composition-specific label (decision 31: Hono RPC for TS-monolith)
+      expect(md).toMatch(/your Hono RPC contract spine/i);
+      // It's a real Mermaid diagram
+      expect(md).toMatch(/```mermaid/);
+      expect(md).toMatch(/graph/);
+    });
+
+    it('docs/architecture/modular-monolith.md diagrams the internal/{auth,items} split-seam (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/architecture/modular-monolith.md'), 'utf8');
+      expect(md).toMatch(/```mermaid/);
+      // Names the modular monolith + the internal modules
+      expect(md).toMatch(/modular monolith/i);
+      expect(md).toMatch(/internal/);
+      expect(md).toMatch(/auth|items/);
+    });
+
+    it('docs/architecture/auth-subtree.md diagrams the auth flow (httpOnly cookie + access token, sole minter) (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/architecture/auth-subtree.md'), 'utf8');
+      expect(md).toMatch(/```mermaid/);
+      // Names the auth flow specifics (decision 16)
+      expect(md).toMatch(/httpOnly|http-only/i);
+      expect(md).toMatch(/access token/i);
+      // Sole minter invariant (decision 11)
+      expect(md).toMatch(/sole minter|sole.*mint/i);
+    });
+
+    it('docs/architecture/typed-rpc-transport.md diagrams batch-by-default transport (decision 17b) (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/architecture/typed-rpc-transport.md'), 'utf8');
+      expect(md).toMatch(/```mermaid/);
+      // Names the transport mechanism
+      expect(md).toMatch(/Hono RPC|typed-RPC|RPC/i);
+      // Batch-by-default rule (decision 17b)
+      expect(md).toMatch(/batch/i);
+    });
+
+    it('docs/adr/README.md explains the ADR convention for future decisions (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const readme = join(targetDir, 'docs/adr/README.md');
+      expect((await stat(readme)).isFile(), 'docs/adr/README.md should exist').toBe(true);
+      const md = await readFile(readme, 'utf8');
+      // Explains the convention
+      expect(md).toMatch(/ADR|architectural decision record/i);
+      // Mentions how to record future decisions
+      expect(md).toMatch(/future|template|convention/i);
+    });
+
+    it('docs/standards/code-style.md documents Biome for TS (decision 29) (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/standards/code-style.md'), 'utf8');
+      // Composition-conditional: TS-monolith gets Biome
+      expect(md).toMatch(/Biome/i);
+      // Points at the config
+      expect(md).toMatch(/biome\.json|config/i);
+      // Explains the one-tool discipline
+      expect(md).toMatch(/one.tool|ESLint.*Prettier|replaces/i);
+    });
+
+    it('docs/standards/best-practices.md documents the per-seam copy-from-README patterns (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/standards/best-practices.md'), 'utf8');
+      // Per-seam best practices
+      expect(md).toMatch(/internal/i);
+      expect(md).toMatch(/contract/i);
+      // The modular monolith seam (decision 27)
+      expect(md).toMatch(/monolith|module/i);
+    });
+
+    it('docs/standards/anti-patterns.md exists with rejected options from decisions 1, 10, 12, 14, 17, 18, 19, 20, 21, 24, 26, 27, 29, 32 (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = await readFile(join(targetDir, 'docs/standards/anti-patterns.md'), 'utf8');
+      // At minimum the decisions the issue calls out
+      for (const decision of ['1', '10', '12', '14', '17', '18', '19', '20', '21', '24', '26', '27', '29', '32']) {
+        expect(md, `anti-patterns.md should reference decision ${decision}`).toMatch(
+          new RegExp(`decision\\s+${decision}\\b`),
+        );
+      }
+      // It's a "don't do this" list
+      expect(md).toMatch(/don't do|anti-pattern|rejected/i);
+    });
+
+    it('docs/wire-it-in/ has no AI fences (composition-conditional per decision 31) (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // AI is off for TS-monolith; AI fences must be absent
+      const wireItInDir = join(targetDir, 'docs/wire-it-in');
+      const entries = await readdir(wireItInDir);
+      // No ai.md or similar AI fence file
+      expect(entries).not.toContain('ai.md');
+      expect(entries).not.toContain('ai-primitives.md');
+      // And the auth.md content doesn't mention AI fences
+      const authMd = await readFile(join(wireItInDir, 'auth.md'), 'utf8');
+      expect(authMd).not.toMatch(/AI fence|composing AI/i);
+    });
+
+    it('scaffolded README has the four sections per decision 33 (issue 08)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      // Section 1: items quickstart (the spine demonstration)
+      expect(readme).toMatch(/items/i);
+      expect(readme).toMatch(/quickstart/i);
+      // Section 2: "what you just saw" (names the architecture)
+      expect(readme).toMatch(/what you just saw/i);
+      // Composition-conditional: TS-monolith names Hono RPC
+      expect(readme).toMatch(/Hono RPC/i);
+      // Section 3: where to extend (the seams)
+      expect(readme).toMatch(/where to extend/i);
+      // Section 4: how to grow (the upgrade paths)
+      expect(readme).toMatch(/how to grow/i);
+    });
+
     it('apps/api .env.example documents JWT_SECRET (sole minter, decision 11)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const env = await readFile(join(targetDir, 'apps/api/.env.example'), 'utf8');

@@ -1,21 +1,15 @@
-// Materializer: root templates (workspace-level config + README).
-//
-// Per issue #27 the materializer is split by workspace; this module owns
-// the 5 files written at the project root (package.json, pnpm-workspace
-// YAML, Taskfile, .gitignore, README). The orchestrator (materialize.ts)
-// calls writeRoot(ctx); template functions are private to this module.
-
 import { join } from 'node:path';
+import { type Composition } from '../composition.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeRoot(ctx: ProjectContext): Promise<void> {
+export async function writeRoot(ctx: ProjectContext, composition: Composition): Promise<void> {
   const { targetDir, name } = ctx;
 
   await writeFileRecursive(join(targetDir, 'package.json'), rootPackageJson(name));
   await writeFileRecursive(join(targetDir, 'pnpm-workspace.yaml'), rootPnpmWorkspaceYaml());
   await writeFileRecursive(join(targetDir, 'Taskfile.yml'), rootTaskfileYml());
   await writeFileRecursive(join(targetDir, '.gitignore'), rootGitignore());
-  await writeFileRecursive(join(targetDir, 'README.md'), rootReadme(name));
+  await writeFileRecursive(join(targetDir, 'README.md'), rootReadme(name, composition));
 }
 
 function rootPackageJson(name: string): string {
@@ -174,60 +168,22 @@ coverage/
 `;
 }
 
-function rootReadme(name: string): string {
+function rootReadme(name: string, composition: Composition): string {
+  const isTs = composition.backend === 'ts';
+  const contractLabel = isTs ? 'Hono RPC' : 'OpenAPI';
+  const webLabel = isTs ? 'Vite + TanStack' : 'Next.js';
+  const apiLabel = isTs ? 'Hono' : 'Gin + Huma';
+
   return `# ${name}
 
 A fullstack TypeScript monorepo scaffolded from
 [create-fs-starter](https://github.com/Johna210/starter).
 
-## What's in here
-
-- \`apps/web\` — Vite + React + TanStack Router + TanStack Query. Reaches
-  the api through the typed \`api-client\` (see \`apps/web/src/lib/api.ts\`).
-- \`apps/api\` — Hono on Node, modular-monolith structure: each domain lives
-  in \`apps/api/src/internal/<name>/\` with a typed interface, mounted at a
-  prefix. The \`items\` and \`auth\` modules are wired end-to-end.
-- \`packages/db\` — Drizzle + pg + zod. The TS schema is the single source
-  of truth; \`drizzle-kit\` emits versioned SQL migrations into
-  \`packages/db/migrations/\`.
-- \`packages/auth\` — the auth shim (decision 12): argon2id passwords,
-  jose-signed JWTs, refresh-token rotation. Thin typed layer over vetted
-  libraries; owns the surface, not the crypto.
-- \`packages/api-client\` — typed Hono RPC client (decision 17/18). The web
-  (and later, mobile) reach the api through this client with end-to-end
-  type inference; no codegen, no separate OpenAPI artifact.
-- \`packages/shared\` — shared TS package (zod schemas + utils, empty for now).
-
-## The items demo (decision 13)
+## Quickstart — the items demo (decision 13)
 
 The scaffold ships a single trivial domain, \`items\`, to prove the whole
 stack composes end-to-end on day one. \`/items\` is **protected** —
 a valid Bearer access token is required on every request:
-
-- \`GET /items\` returns the list (Hono route → \`requireAuth\` → \`ItemsRepo.list()\` → Drizzle → Postgres).
-- \`POST /items\` with \`{ "name": "..." }\` creates a row and returns it.
-
-It's a 5-minute delete when you start your real domain, not a refactor.
-
-## Auth (decision 12)
-
-Four public endpoints on the api, mounted at \`/auth/\`:
-
-- \`POST /auth/register\` — \`{ email, password }\` → \`{ access, refresh, userId }\` (201). Sets an httpOnly refresh cookie.
-- \`POST /auth/login\` — \`{ email, password }\` → \`{ access, refresh, userId }\`. Sets an httpOnly refresh cookie.
-- \`POST /auth/refresh\` — accepts the refresh via the httpOnly cookie (web) or \`{ refresh }\` in the body (mobile) → \`{ access, refresh }\` (rotation; old refresh is revoked). Sets a new httpOnly cookie on the web path.
-- \`POST /auth/logout\` — same dual-channel \`refresh\` lookup → \`{ ok: true }\` (idempotent). Clears the httpOnly cookie on the web path.
-
-\`apps/api\` is the **sole minter** of JWTs in this monorepo (decision 11):
-no other service reads \`JWT_SECRET\`. Generate one with
-\`openssl rand -base64 48\` and put it in \`apps/api/.env\`; the rest of
-the env contract is in \`apps/api/.env.example\`.
-
-The shim is intentionally narrow. Email verification, password reset,
-MFA, OAuth, and RBAC are explicitly *fences* (not features) — see
-\`docs/wire-it-in/auth.md\` for the seams.
-
-## Quickstart
 
 \`\`\`sh
 # 1. Install Taskfile (go-task) if you don't have it:
@@ -250,6 +206,11 @@ talks to the api over a same-origin path (the httpOnly refresh cookie
 is always first-party). Try it: open http://localhost:5173, click
 **Sign in**, register an account, and you land on the items page.
 
+- \`GET /items\` returns the list (${apiLabel} route → \`requireAuth\` → \`ItemsRepo.list()\` → Drizzle → Postgres).
+- \`POST /items\` with \`{ "name": "..." }\` creates a row and returns it.
+
+It's a 5-minute delete when you start your real domain, not a refactor.
+
 To run the one E2E:
 
 \`\`\`sh
@@ -259,6 +220,83 @@ To run the one E2E:
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter
 pnpm test:e2e
 \`\`\`
+
+## What you just saw
+
+You just saw the **${contractLabel} contract spine** (decisions 3, 9, 17, 18) in
+action: \`apps/web\` reaches \`apps/api\` through \`@starter/api-client\`,
+a typed client generated from the router's TS type via \`hc<typeof app>()\`.
+No codegen, no OpenAPI artifact — the contract is the router itself.
+
+The **modular monolith** (decision 27) under \`apps/api\` holds two
+modules (\`internal/auth\`, \`internal/items\`) with typed interfaces and
+a router mounting them at prefixes. The **auth shim** (decision 12) gates
+\`/items\` behind a Bearer access token, with an httpOnly refresh cookie
+for transparent renewal (decision 16).
+
+**Your contract spine**: the router's TS type is the contract. The web
+client is generated from it by \`hc<typeof app>()\` — no artifact,
+no codegen, no separate source of truth.
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/web (${webLabel})"
+        W["web pages"]
+        AC["@starter/api-client<br/>hc&lt;typeof app&gt;()"]
+    end
+    subgraph "apps/api (${apiLabel} on Node)"
+        R["${apiLabel} app"]
+        M["internal/auth<br/>internal/items"]
+    end
+    subgraph "packages/"
+        DB["@starter/db"]
+        AUTH["@starter/auth"]
+    end
+    W -->|typed call| AC
+    AC -->|HTTP + Bearer| R
+    R -->|mounts| M
+    M -->|uses| AUTH
+    M -->|uses| DB
+\`\`\`
+
+For the full architecture, see [\`docs/architecture/\`](docs/architecture/).
+
+## Where to extend
+
+The scaffold ships honest seams — each is a documented extension point:
+
+- **Add a db table**: edit \`packages/db/src/schema/\`, then
+  \`task db:generate\` to emit a migration, then \`task migrate\`.
+- **Add an api domain**: \`apps/api/src/internal/<name>/\` with
+  \`<name>.repo.ts\` (interface) + \`<name>.routes.ts\` (Hono) +
+  \`index.ts\` (mountable module); mount it in \`apps/api/src/index.ts\`.
+  Behind \`requireAuth\` if it needs an authenticated principal.
+- **Wire a fence from the auth shim** (email-verify, password reset,
+  MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
+- **Add a web page**: create a route in \`apps/web/src/pages/\` and
+  register it in \`apps/web/src/router.tsx\`; reach the api through
+  \`apiClient\` (re-exported from \`apps/web/src/lib/api\`).
+
+Each seam is one line + a link into [\`docs/standards/best-practices.md\`](docs/standards/best-practices.md).
+
+## How to grow
+
+The scaffold is designed for seam-preserving upgrades — copy the pattern,
+don't refactor:
+
+- **Monolith to microservices** (decisions 10, 27): copy the example
+  split pattern — extract \`internal/auth\` into \`apps/api-auth\` as a
+  separate deployable. The modular monolith's \`internal/*\` structure is
+  already prepared for this.
+- **Add a web variant** (decision 15): create a new \`apps/web-\` with
+  the same \`api-client\` — the contract is invariant, only the
+  rendering shell changes.
+- **Add an AI layer** (decisions 20, 21): AI is opt-in. Scaffold with
+  \`ai: on\` to get \`packages/ai\` with composable primitives (chat,
+  embeddings, tool calling). See \`docs/wire-it-in/\` when AI is on.
+- **Record your decisions** (decision 30): use \`docs/adr/\` to record
+  architectural decisions. Each ADR is a short document — see the
+  convention in [\`docs/adr/README.md\`](docs/adr/README.md).
 
 ## Tasks
 
@@ -280,19 +318,5 @@ It boots the stack via \`task dev\`, logs in, creates an item via the form,
 and asserts the item persists across a page reload. This is the **only** E2E
 the starter owns — per-feature E2Es are your job. The full rulebook is in
 [\`docs/test-strategy.md\`](docs/test-strategy.md).
-
-## Where to extend
-
-- **Add an api domain**: \`apps/api/src/internal/<name>/\` with
-  \`<name>.repo.ts\` (interface) + \`<name>.routes.ts\` (Hono) +
-  \`index.ts\` (mountable module); mount it in \`apps/api/src/index.ts\`.
-  Behind \`requireAuth\` if it needs an authenticated principal.
-- **Add a db table**: edit \`packages/db/src/schema/\`, then
-  \`task db:generate\` to emit a migration, then \`task migrate\`.
-- **Wire a fence from the auth shim** (email-verify, password reset,
-  MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
-- **Add a web page**: create a route in \`apps/web/src/pages/\` and
-  register it in \`apps/web/src/router.tsx\`; reach the api through
-  \`apiClient\` (re-exported from \`apps/web/src/lib/api\`).
 `;
 }
