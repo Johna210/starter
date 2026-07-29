@@ -64,3 +64,4 @@ build/
 *.tgz
 .turbo/
 bin/
+.pi-subagents/

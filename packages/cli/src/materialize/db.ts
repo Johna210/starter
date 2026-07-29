@@ -32,6 +32,16 @@ export async function writeDb(ctx: ProjectContext): Promise<void> {
     join(targetDir, 'packages/db/migrations/0002_refresh_tokens.sql'),
     dbMigration0002(),
   );
+  // Drizzle's CLI migrator (`drizzle-kit migrate`, which the root
+  // Taskfile's `task migrate` invokes) requires meta/_journal.json
+  // listing the migrations in order. The hand-authored SQL files
+  // here are not drizzle-kit-generated, so we ship the journal
+  // alongside them so `task migrate` works on a fresh scaffold
+  // (issue 09 surfaced this when the E2E couldn't bootstrap its DB).
+  await writeFileRecursive(
+    join(targetDir, 'packages/db/migrations/meta/_journal.json'),
+    dbMigrationJournal(),
+  );
 }
 
 function dbPackageJson(): string {
@@ -235,7 +245,12 @@ import { integer, pgTable, timestamp, varchar } from 'drizzle-orm/pg-core';
 export const itemsTable = pgTable('items', {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: varchar({ length: 256 }).notNull(),
-  createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+  // Explicit snake_case column name: matches the migration SQL and
+  // keeps the TS field name ergonomic for callers (without the
+  // explicit name Drizzle defaults to the TS field name and the
+  // runtime SQL would reference "createdAt", which the table
+  // doesn't have).
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export type Item = typeof itemsTable.$inferSelect;
@@ -267,7 +282,7 @@ export const usersTable = pgTable(
     id: integer().primaryKey().generatedAlwaysAsIdentity(),
     email: text().notNull(),
     passwordHash: text('password_hash').notNull(),
-    createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
     emailIdx: uniqueIndex('users_email_idx').on(t.email),
@@ -342,4 +357,29 @@ EXCEPTION
   WHEN duplicate_object THEN null;
 END $$;
 `;
+}
+
+/**
+ * Drizzle's CLI migrator requires `meta/_journal.json` listing the
+ * migrations in order (drizzle-orm/migrator.js: readMigrationFiles).
+ * The hand-authored SQL files in this scaffold aren't drizzle-kit-
+ * generated, so we ship the journal alongside them. Schema version
+ * ("7") and dialect ("postgresql") match what drizzle-kit writes
+ * for the current versions of drizzle-orm / drizzle-kit; bump
+ * together if the scaffolded version is ever upgraded.
+ */
+function dbMigrationJournal(): string {
+  return JSON.stringify(
+    {
+      version: '7',
+      dialect: 'postgresql',
+      entries: [
+        { idx: 0, version: '7', when: 1730000000000, tag: '0000_items', breakpoints: true },
+        { idx: 1, version: '7', when: 1730000001000, tag: '0001_users', breakpoints: true },
+        { idx: 2, version: '7', when: 1730000002000, tag: '0002_refresh_tokens', breakpoints: true },
+      ],
+    },
+    null,
+    2,
+  ) + '\n';
 }

@@ -290,6 +290,25 @@ describe('materialize', () => {
       expect(main).toMatch(/AuthProvider>[\s\S]*RouterProvider/);
     });
 
+    it('apps/web main.tsx bootstraps the session via /auth/refresh on load (issue 09; survives page reload)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const main = await readFile(join(targetDir, 'apps/web/src/main.tsx'), 'utf8');
+      // The SPA stores the access token in memory; without a refresh
+      // on boot, a hard reload redirects the user to /login. The
+      // bootstrap call restores the session from the httpOnly cookie
+      // BEFORE React mounts (so the route guards see the right
+      // state on the first render — no flash of /login).
+      expect(main).toMatch(/auth\/refresh/);
+      // Uses the typed apiClient (decision 15: web's only door to the
+      // api), which sends the httpOnly cookie via authedFetch's
+      // `credentials: 'include'`. The api-client's authedFetch
+      // short-circuits /auth/* so the refresh call won't recurse on
+      // 401 (the auth surface is excluded from refresh-on-401).
+      expect(main).toMatch(/apiClient\.auth\.refresh/);
+      // The bootstrap completes (or times out) before createRoot
+      expect(main).toMatch(/bootstrapAuth|finally\(\(\)\s*=>\s*createRoot/);
+    });
+
     it('apps/web/lib/api.ts attaches a Bearer access token and refreshes on 401 (issue 06)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
@@ -795,6 +814,134 @@ describe('materialize', () => {
       for (const task of ['dev:', 'test:', 'build:']) {
         expect(tf, `Taskfile should declare ${task}`).toContain(task);
       }
+    });
+
+    // ---- E2E (issue 09) ------------------------------------------------
+
+    it('ships the E2E test file (e2e/items-flow.spec.ts) and Playwright config (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // The single E2E test file (decision 22: one E2E, the items flow).
+      const spec = join(targetDir, 'e2e/items-flow.spec.ts');
+      expect((await stat(spec)).isFile(), 'e2e/items-flow.spec.ts should exist').toBe(true);
+      // The Playwright config at the project root.
+      const cfg = join(targetDir, 'playwright.config.ts');
+      expect((await stat(cfg)).isFile(), 'playwright.config.ts should exist').toBe(true);
+    });
+
+    it('E2E spec exercises the items flow end-to-end (login → /items → create → refresh → still there) (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const spec = await readFile(join(targetDir, 'e2e/items-flow.spec.ts'), 'utf8');
+      // Imports from @playwright/test
+      expect(spec).toMatch(/from\s+['"]@playwright\/test['"]/);
+      // test(...) and the assertions the spec calls for
+      expect(spec).toMatch(/\btest\(/);
+      // The flow steps the issue calls out:
+      //  - registers a user (or seeds one)
+      //  - logs in via the UI (or uses a pre-seeded user)
+      //  - navigates to /items
+      //  - creates an item via the form
+      //  - asserts the new item appears
+      //  - refreshes the page; asserts the item is still there
+      expect(spec).toMatch(/register|seed/i);                  // setup
+      expect(spec).toMatch(/login|sign in|signIn/i);          // login
+      expect(spec).toMatch(/\/items/);                         // nav
+      expect(spec).toMatch(/create|submit|POST/i);             // create
+      expect(spec).toMatch(/page\.reload|reload|refresh/i);   // refresh
+      // TanStack Query selector for the items list + the form input aria-label
+      // the web app actually exposes (apps/web/src/pages/items.tsx).
+      expect(spec).toMatch(/aria-label=["']Item name["']|input[^]*name/);
+    });
+
+    it('E2E spec skips cleanly when DATABASE_URL is unset (mirrors the per-workspace describeDb skip pattern) (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const spec = await readFile(join(targetDir, 'e2e/items-flow.spec.ts'), 'utf8');
+      // The skip at the top of the file means `task test` stays runnable
+      // in DB-less environments (the api won't boot without one).
+      expect(spec).toMatch(/test\.skip/);
+      expect(spec).toMatch(/DATABASE_URL/);
+    });
+
+    it('playwright.config.ts boots the full stack via `task dev` (webServer) and points at the e2e/ dir (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const cfg = await readFile(join(targetDir, 'playwright.config.ts'), 'utf8');
+      // Uses @playwright/test's defineConfig
+      expect(cfg).toMatch(/from\s+['"]@playwright\/test['"]/);
+      expect(cfg).toMatch(/defineConfig/);
+      // testDir is the e2e/ directory at the project root
+      expect(cfg).toMatch(/testDir\s*:\s*['"]\.\/e2e['"]/);
+      // webServer is configured to boot the full stack with `task dev`
+      // and wait for the web's URL.
+      expect(cfg).toMatch(/webServer/);
+      expect(cfg).toMatch(/task\s+dev/);
+      expect(cfg).toMatch(/localhost:5173/);
+    });
+
+    it('root package.json declares @playwright/test as a devDependency (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'package.json'), 'utf8'),
+      );
+      expect(pkg.devDependencies?.['@playwright/test']).toEqual(expect.any(String));
+      // And a `test:e2e` script so `pnpm test:e2e` (the AC) works
+      expect(pkg.scripts['test:e2e']).toMatch(/playwright/);
+    });
+
+    it('root Taskfile declares a test:e2e target wired into the `test` meta-task (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      // test:e2e is declared
+      expect(tf, 'Taskfile should declare test:e2e').toMatch(/^  test:e2e:/m);
+      // and runs pnpm (which delegates to the `playwright test` script
+      // in root package.json — the Taskfile is a thin wrapper per the
+      // per-workspace pattern in this scaffold).
+      const e2eBlock = tf.match(/^  test:e2e:\n(?:    .+\n)+/m);
+      expect(e2eBlock, 'test:e2e block should exist').toBeTruthy();
+      expect(e2eBlock![0]).toMatch(/pnpm/);
+      // The `test` meta-task includes test:e2e
+      const testBlock = tf.match(/^  test:\n(?:    .+\n)+/m);
+      expect(testBlock, '`test` task should exist').toBeTruthy();
+      expect(testBlock![0]).toMatch(/test:e2e/);
+    });
+
+    it('root README documents the one-E2E-only discipline (issue 09, decision 22)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      // The README points at the E2E
+      expect(readme).toMatch(/e2e|E2E|playwright/i);
+      // And calls out the one-E2E-only discipline (the E2E ownership
+      // is the starter's; user features own their own E2Es).
+      expect(readme).toMatch(/one[\s-]+E2E|one E2E|single E2E/i);
+    });
+
+    it('ships docs/test-strategy.md documenting the test pyramid (issue 09, decision 22)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const md = join(targetDir, 'docs/test-strategy.md');
+      expect((await stat(md)).isFile(), 'docs/test-strategy.md should exist').toBe(true);
+      const text = await readFile(md, 'utf8');
+      // Documents the three layers (unit, contract, e2e)
+      expect(text).toMatch(/unit/i);
+      expect(text).toMatch(/contract/i);
+      expect(text).toMatch(/e2e|E2E/i);
+      // And the one-E2E-only rule
+      expect(text).toMatch(/one[\s-]+E2E|one E2E|single E2E|only one E2E/i);
+    });
+
+    it('packages/db ships a drizzle meta journal so `task migrate` works (issue 09; pre-existing scaffold bug surfaced by the E2E)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // Drizzle's CLI migrator (`drizzle-kit migrate`) requires
+      // meta/_journal.json listing the migrations in order. Without
+      // it, `task migrate` fails with "Can't find meta/_journal.json
+      // file" — the E2E can't bootstrap a fresh DB without it.
+      const journalPath = join(targetDir, 'packages/db/migrations/meta/_journal.json');
+      expect((await stat(journalPath)).isFile(), 'meta/_journal.json should exist').toBe(true);
+      const journal = JSON.parse(await readFile(journalPath, 'utf8'));
+      expect(journal.version).toBe('7');
+      expect(journal.dialect).toBe('postgresql');
+      expect(Array.isArray(journal.entries)).toBe(true);
+      // Every SQL migration in the scaffold has a journal entry, in
+      // order, with the matching tag (the file the migrator reads).
+      const tags = journal.entries.map((e: { tag: string }) => e.tag);
+      expect(tags).toEqual(['0000_items', '0001_users', '0002_refresh_tokens']);
     });
   });
 
