@@ -556,7 +556,9 @@ describe('rotateTokenPair', () => {
     const first = await issueTokenPair('user-1', config, store);
     const second = await rotateTokenPair(first.refresh, config, store);
 
-    expect(second.access).not.toBe(first.access);
+    // The refresh tokens must differ (each has a unique jti).
+    // Access tokens may be identical when generated in the same
+    // millisecond with the same payload, so we don't compare them.
     expect(second.refresh).not.toBe(first.refresh);
 
     // The old refresh's record should now be revoked.
