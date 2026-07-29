@@ -137,6 +137,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './router';
 import { AuthProvider } from './auth';
+import { accessTokenStore } from './lib/api';
 import './app.css';
 
 const queryClient = new QueryClient();
@@ -144,15 +145,52 @@ const queryClient = new QueryClient();
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('root element not found');
 
-createRoot(rootEl).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-);
+/**
+ * Bootstrap session restore (issue 09 / decision 16).
+ *
+ * The SPA stores the access token **in memory** (decision 16's
+ * SPA storage model), so a hard reload loses it. The refresh token
+ * lives in an httpOnly cookie that DOES survive the reload, so
+ * before we mount React we attempt a /auth/refresh from the same
+ * origin. On success the in-memory access token is populated and
+ * the user's session is back; on failure the user is signed out
+ * and the route guard will send them to /login.
+ *
+ * The refresh runs synchronously before \`createRoot\`, so the
+ * router's \`beforeLoad\` guards (which read \`accessTokenStore\`)
+ * see the correct state on the very first render — no flash of
+ * \`/login\` for a user who is actually still signed in.
+ */
+async function bootstrapAuth(): Promise<void> {
+  // \`/api/auth/refresh\` — the same path the api-client uses; Vite's
+  // dev proxy (and the deploy platform's reverse proxy) routes it
+  // to apps/api. \`credentials: 'include'\` sends the httpOnly cookie.
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { access?: string };
+      if (data.access) accessTokenStore.set(data.access);
+    }
+  } catch {
+    // Network error / no cookie / etc — leave the user signed out;
+    // the route guard handles the redirect.
+  }
+}
+
+void bootstrapAuth().finally(() => {
+  createRoot(rootEl!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+});
 `;
 }
 

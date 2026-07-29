@@ -290,6 +290,21 @@ describe('materialize', () => {
       expect(main).toMatch(/AuthProvider>[\s\S]*RouterProvider/);
     });
 
+    it('apps/web main.tsx bootstraps the session via /auth/refresh on load (issue 09; survives page reload)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const main = await readFile(join(targetDir, 'apps/web/src/main.tsx'), 'utf8');
+      // The SPA stores the access token in memory; without a refresh
+      // on boot, a hard reload redirects the user to /login. The
+      // bootstrap call restores the session from the httpOnly cookie
+      // BEFORE React mounts (so the route guards see the right
+      // state on the first render — no flash of /login).
+      expect(main).toMatch(/auth\/refresh/);
+      // credentials: 'include' is what sends the httpOnly cookie
+      expect(main).toMatch(/credentials\s*:\s*['"]include['"]/);
+      // The bootstrap completes (or times out) before createRoot
+      expect(main).toMatch(/bootstrapAuth|finally\(\(\)\s*=>\s*createRoot/);
+    });
+
     it('apps/web/lib/api.ts attaches a Bearer access token and refreshes on 401 (issue 06)', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const api = await readFile(join(targetDir, 'apps/web/src/lib/api.ts'), 'utf8');
@@ -896,6 +911,24 @@ describe('materialize', () => {
       expect(text).toMatch(/e2e|E2E/i);
       // And the one-E2E-only rule
       expect(text).toMatch(/one[\s-]+E2E|one E2E|single E2E|only one E2E/i);
+    });
+
+    it('packages/db ships a drizzle meta journal so `task migrate` works (issue 09; pre-existing scaffold bug surfaced by the E2E)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // Drizzle's CLI migrator (`drizzle-kit migrate`) requires
+      // meta/_journal.json listing the migrations in order. Without
+      // it, `task migrate` fails with "Can't find meta/_journal.json
+      // file" — the E2E can't bootstrap a fresh DB without it.
+      const journalPath = join(targetDir, 'packages/db/migrations/meta/_journal.json');
+      expect((await stat(journalPath)).isFile(), 'meta/_journal.json should exist').toBe(true);
+      const journal = JSON.parse(await readFile(journalPath, 'utf8'));
+      expect(journal.version).toBe('7');
+      expect(journal.dialect).toBe('postgresql');
+      expect(Array.isArray(journal.entries)).toBe(true);
+      // Every SQL migration in the scaffold has a journal entry, in
+      // order, with the matching tag (the file the migrator reads).
+      const tags = journal.entries.map((e: { tag: string }) => e.tag);
+      expect(tags).toEqual(['0000_items', '0001_users', '0002_refresh_tokens']);
     });
   });
 

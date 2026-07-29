@@ -154,7 +154,10 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'task dev',
+    // Migrate first so the api's first request doesn't 500 on a
+    // missing table; then boot the full stack. \`task migrate\` is
+    // idempotent (drizzle-kit skips already-applied migrations).
+    command: 'task migrate && task dev',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     // 3 min: cold pnpm install + drizzle migrate + api boot.
