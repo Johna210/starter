@@ -1,64 +1,124 @@
-name: ci
+# CI — starter repo + scaffolded project tests.
+#
+# Per issue 11 the matrix currently has one row (TS-monolith).
+# Adding a new blessed combination (issue 18) is a single config
+# change: add a row to the matrix and a matching step in the
+# "scaffolded project" job.
+#
+# Per decision 22 the test pyramid is unit + contract + one E2E
+# over items. The starter repo's own tests (contract.sh + vitest)
+# run first; then the CI materialises a fresh scaffolded project
+# and runs its full suite including the Playwright E2E.
+
+name: CI
 
 on:
-  pull_request:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  starter-build:
-    name: starter-build
+  ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shape: ts-monolith
+            # Extensible: add `go-monolith`, `ts-microservices`,
+            # `go-microservices` rows here per issue 18.
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: starter
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/starter
+      NODE_OPTIONS: --max-old-space-size=4096
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
 
       - name: Install Taskfile
-        uses: arduino/setup-task@v2
-        with:
-          version: 3.52.0
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sS https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        # version is read from package.json's `packageManager` field —
-        # single source of truth, no mismatch with the action's `version` input.
-
-      - name: Install dependencies
+      - name: Install dependencies (starter)
         run: pnpm install --frozen-lockfile
 
-      - name: Run task build
-        run: task build
-
-  cli-test:
-    name: cli-test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Taskfile
-        uses: arduino/setup-task@v2
-        with:
-          version: 3.52.0
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        # version is read from package.json's `packageManager` field.
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run task test
+      # ── Starter repo tests (contract + CLI vitest) ──────────────
+      - name: Starter tests
         run: task test
+
+      # ── Scaffolded project: materialize, install, test ──────────
+      - name: Build CLI
+        run: pnpm --filter create-fs-starter build
+
+      - name: Materialize test project
+        run: npx tsx ci/materialize-test-project.ts /tmp/test-project
+
+      - name: Install dependencies (test project)
+        run: pnpm install
+        working-directory: /tmp/test-project
+
+      - name: Scaffolded project — unit tests
+        run: |
+          task test:web
+          task test:api
+          task test:auth
+          task test:shared
+          task test:db
+        working-directory: /tmp/test-project
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Scaffolded project — typecheck (compile-time contract)
+        run: |
+          for ws in packages/db packages/api-client apps/api apps/web; do
+            echo "::group::typecheck $ws"
+            (cd "$ws" && pnpm typecheck)
+            echo "::endgroup::"
+          done
+        working-directory: /tmp/test-project
+
+      # ── E2E (Playwright over the items flow, decision 22) ──────
+      - name: Run migrations
+        run: task migrate
+        working-directory: /tmp/test-project
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: /tmp/test-project
+
+      - name: E2E — items flow
+        run: pnpm test:e2e
+        working-directory: /tmp/test-project
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
