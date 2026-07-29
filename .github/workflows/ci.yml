@@ -88,11 +88,14 @@ jobs:
 
       - name: Scaffolded project — unit tests
         run: |
-          task test:web
-          task test:api
-          task test:auth
-          task test:shared
-          task test:db
+          # Continue past workspaces with no test files (vitest exits 1).
+          FAILED=0
+          for task in test:web test:api test:auth test:shared test:db; do
+            echo "::group::$task"
+            task "$task" || FAILED=1
+            echo "::endgroup::"
+          done
+          exit $FAILED
         working-directory: /tmp/test-project
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
