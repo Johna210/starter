@@ -1,17 +1,40 @@
-// Materializer: docs/wire-it-in/ templates.
-//
-// Per issue #27 the materializer is split by workspace; this module owns
-// the docs files written under docs/wire-it-in/ (currently just auth.md,
-// the fence guide for the auth shim). The orchestrator (materialize.ts)
-// calls writeDocs(ctx); template functions are private to this module.
-
 import { join } from 'node:path';
+import { type Composition } from '../composition.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeDocs(ctx: ProjectContext): Promise<void> {
+export async function writeDocs(ctx: ProjectContext, composition: Composition): Promise<void> {
   const { targetDir } = ctx;
+  const isTs = composition.backend === 'ts';
+  const isAiOn = composition.ai === 'on';
+
+  await writeFileRecursive(
+    join(targetDir, 'docs/architecture/contract-spine.md'),
+    isTs ? contractSpineTsMd() : contractSpineGoMd(),
+  );
+  await writeFileRecursive(
+    join(targetDir, 'docs/architecture/modular-monolith.md'),
+    modularMonolithMd(),
+  );
+  await writeFileRecursive(
+    join(targetDir, 'docs/architecture/auth-subtree.md'),
+    authSubtreeMd(),
+  );
+  await writeFileRecursive(
+    join(targetDir, 'docs/architecture/typed-rpc-transport.md'),
+    isTs ? typedRpcTransportTsMd() : typedRpcTransportGoMd(),
+  );
 
   await writeFileRecursive(join(targetDir, 'docs/wire-it-in/auth.md'), wireItInAuthMd());
+  if (isAiOn) {
+    await writeFileRecursive(join(targetDir, 'docs/wire-it-in/ai.md'), wireItInAiMd());
+  }
+
+  await writeFileRecursive(join(targetDir, 'docs/adr/README.md'), adrReadmeMd());
+
+  await writeFileRecursive(join(targetDir, 'docs/standards/code-style.md'),
+    isTs ? codeStyleTsMd() : codeStyleGoMd());
+  await writeFileRecursive(join(targetDir, 'docs/standards/best-practices.md'), bestPracticesMd());
+  await writeFileRecursive(join(targetDir, 'docs/standards/anti-patterns.md'), antiPatternsMd());
 }
 
 function wireItInAuthMd(): string {
@@ -108,5 +131,781 @@ auth framework* (every CVE, every rotation bug lands forever). A
 "documented stub" is the bait-and-switch rejected at the architecture
 level in decision 10. Fences are the third path: the seam is real,
 the shim is honest, the rest is a deliberate handoff.
+`;
+}
+
+function wireItInAiMd(): string {
+  return `# Wire it in: AI
+
+The AI fence (decision 13) is **on** for this composition. The scaffold
+provides a documented stub — a single \`packages/ai\` workspace with a
+shim that returns a hard-coded response. The seam is real; replacing the
+stub with a real provider is a deliberate handoff.
+
+## What the scaffold ships
+
+\`packages/ai/\` contains:
+
+- \`src/index.ts\` — exports \`ai.generateText(...)\` (a thin wrapper)
+- \`src/provider.ts\` — the stub provider (hard-coded response)
+
+The stub is **honest**: it does exactly what it says — returns a hard-coded
+response. No hidden behavior, no mock that pretends to be real.
+
+## How to replace
+
+1. Pick a provider (OpenAI, Anthropic, local model, etc.)
+2. Replace the stub in \`src/provider.ts\` with real API calls
+3. Keep the same \`generateText\` interface — the callers don't change
+4. Add your API key to \`.env.local\` (gitignored, not committed)
+
+The fence is the interface, not the implementation. The starter owns the
+surface; you own the provider.
+`;
+}
+
+function contractSpineTsMd(): string {
+  return `# Your Hono RPC contract spine
+
+This is your contract spine: the single API agreement between \`apps/web\`
+and \`apps/api\` in this TS-monolith scaffold (decisions 3, 9, 17, 18).
+
+## How it works
+
+In TS-only shapes (this one), the contract is **implicit** — shared TS
+types, no artifact. The api framework is **Hono** (decision 18), so the
+contract mechanism is **Hono RPC** (\`hc<typeof app>()\`): the router's TS
+type *is* the wire contract, inferred end-to-end (inputs, outputs, error
+shapes), no codegen, no separate source of truth to drift.
+
+\`@starter/api-client\` imports \`AppType\` from \`@starter/api\` and builds
+a typed client via \`hc<typeof app>()\`. A type error in the api is a
+compile error in the web client — the contract is checked at compile time
+(decision 22: type-inference *is* the contract test in TS shapes).
+
+## Diagram
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/web (Vite + TanStack)"
+        W["web pages<br/>(TanStack Query/Router)"]
+        AC["@starter/api-client<br/>hc&lt;typeof app&gt;()"]
+    end
+
+    subgraph "apps/api (Hono on Node)"
+        A["AppType<br/>(the router type)"]
+        M["internal/auth<br/>internal/items"]
+        R["Hono app<br/>.route('/auth')<br/>.route('/items')"]
+    end
+
+    subgraph "packages/"
+        DB["@starter/db<br/>(Drizzle schema)"]
+        AUTH["@starter/auth<br/>(argon2 + jose)"]
+    end
+
+    W -->|typed call| AC
+    AC -->|HTTP + Bearer| R
+    R -->|mounts| M
+    A <-->|type inference| AC
+    M -->|uses| AUTH
+    M -->|uses| DB
+\`\`\`
+
+**Your Hono RPC contract spine**: the router's TS type is the contract.
+The web client is generated from it by \`hc<typeof app>()\` — no artifact,
+no codegen, no separate source of truth.
+`;
+}
+
+function contractSpineGoMd(): string {
+  return `# Your OpenAPI contract spine
+
+This is your contract spine: the single API agreement between \`apps/web\`
+and \`apps/api\` in this Go-monolith scaffold (decisions 3, 9, 19).
+
+## How it works
+
+In polyglot shapes (this one), the contract is **explicit** — an
+\`openapi.yaml\` file in \`packages/contract\`. The api framework is
+**Gin + Huma** (decision 19): operations are defined as typed Go
+input/output structs on Gin routes; Huma validates at runtime and
+**generates the OpenAPI spec from those structs**.
+
+The OpenAPI file is **generated from the Go api's structs** during build
+and **committed** to the repo — not hand-authored. TS/Dart clients are
+then generated from the committed file.
+
+## Diagram
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/web (Next.js)"
+        W["web pages<br/>(RSC + loaders)"]
+        C["@starter/contract<br/>(generated TS client)"]
+    end
+
+    subgraph "packages/contract"
+        O["openapi.yaml<br/>(generated from Go structs)"]
+    end
+
+    subgraph "apps/api (Gin + Huma)"
+        G["Gin routes<br/>(typed Go structs)"]
+        H["Huma<br/>(validation + OpenAPI gen)"]
+    end
+
+    subgraph "packages/"
+        DB["database<br/>(Go-native)"]
+    end
+
+    W -->|typed call| C
+    C -->|HTTP| G
+    G -->|validates| H
+    H -->|generates| O
+    G -->|uses| DB
+\`\`\`
+
+**Your OpenAPI contract spine**: Go structs are the source of truth;
+the OpenAPI file is generated and committed; TS clients are generated
+from it.
+`;
+}
+
+function modularMonolithMd(): string {
+  return `# The modular monolith
+
+This scaffold is a **modular monolith** (decision 27): \`apps/api\` has the
+same internal-module structure as the microservices split-seam (decision
+10), just without the example split having happened yet.
+
+## How it works
+
+\`apps/api/src/internal/<name>/\` contains one module per domain:
+
+- \`<name>.repo.ts\` — the typed interface (the seam)
+- \`<name>.routes.ts\` — the Hono router factory
+- \`index.ts\` — mounts the module at a prefix
+
+The api's \`src/index.ts\` mounts each module:
+
+\`\`\`ts
+app
+  .route('/auth', makeAuthModule(...))
+  .use('*', requireAuth(...))
+  .route('/items', makeItemsModule(...))
+\`\`\`
+
+The **only** difference from a microservices shape is that the example
+split (decision 10) hasn't happened — auth is still an \`internal/auth\`
+module, not a separate \`apps/api-auth\` deployable. The monolith→microservices
+upgrade is a **seam-preserving extraction**: copy the example split, no
+refactor of \`apps/api\` required.
+
+## Diagram
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/api (monolith)"
+        I["src/index.ts<br/>(router mounts)"]
+        AUTH["internal/auth/<br/>repo.ts + routes.ts + index.ts"]
+        ITEMS["internal/items/<br/>repo.ts + routes.ts + index.ts"]
+    end
+
+    subgraph "packages/"
+        DB["@starter/db<br/>(Drizzle)"]
+        AUTH_PKG["@starter/auth<br/>(argon2 + jose)"]
+    end
+
+    I -->|route('/auth')| AUTH
+    I -->|route('/items')<br/>+ requireAuth| ITEMS
+    AUTH -->|imports| AUTH_PKG
+    AUTH -->|imports| DB
+    ITEMS -->|imports| DB
+\`\`\`
+
+**The split-seam is present whether or not a split has happened yet**
+(decision 10). The example split (extracting \`internal/auth\` →
+\`apps/api-auth\`) is a future ticket; the structure is already here.
+`;
+}
+
+function authSubtreeMd(): string {
+  return `# The auth subtree
+
+This scaffold ships an **auth shim** (decision 12): a thin typed layer over
+vetted libraries that owns the surface of auth (token shape, argon2id
+params, the four HTTP endpoints, refresh rotation) — not the crypto.
+
+## How it works
+
+\`apps/api\` is the **sole minter** of JWTs in this monorepo (decision 11):
+no other service reads \`JWT_SECRET\`. The web-auth flow (decision 16) is
+uniform across web variants:
+
+1. \`POST /auth/login\` (or \`/register\`) verifies the password via
+   \`packages/auth\` (argon2id), issues a token pair, and sets an **httpOnly
+   refresh cookie** + returns a short-lived **access token** in the body.
+2. \`apps/web\` stores the access token **in memory** (SPA storage model).
+3. \`@starter/api-client\` attaches the access token as a **Bearer header**
+   to every api call.
+4. On 401, \`api-client\` calls \`POST /auth/refresh\` (which re-reads the
+   httpOnly cookie), rotates the refresh token, and retries the original
+   request.
+
+## Diagram
+
+\`\`\`mermaid
+sequenceDiagram
+    participant Browser as apps/web (SPA)
+    participant Client as @starter/api-client
+    participant API as apps/api
+    participant Auth as packages/auth
+
+    Note over Browser,API: Login
+
+    Browser->>API: POST /auth/login {email, password}
+    API->>Auth: verifyPassword (argon2id)
+    Auth-->>API: ok
+    API->>Auth: issueTokenPair (jose)
+    Auth-->>API: {access, refresh}
+    API-->>Browser: {access, refresh, userId}<br/>Set-Cookie: refresh (httpOnly)
+    Note right of Browser: access token stored in memory
+
+    Note over Browser,API: API call (Bearer)
+
+    Browser->>Client: apiClient.items.$get()
+    Client->>Browser: read in-memory access token
+    Client->>API: GET /items<br/>Authorization: Bearer <access>
+    API->>Auth: verifyToken (jose)
+    Auth-->>API: ok
+    API-->>Client: items list
+
+    Note over Browser,API: Refresh on 401
+
+    Client->>API: GET /items -> 401 (access expired)
+    Client->>API: POST /auth/refresh<br/>(httpOnly cookie sent automatically)
+    API->>Auth: rotateTokenPair
+    Auth-->>API: {access, refresh}
+    API-->>Client: {access, refresh}<br/>Set-Cookie: refresh (httpOnly)
+    Client->>API: GET /items (retry)<br/>Authorization: Bearer <new access>
+    API-->>Client: items list
+\`\`\`
+
+**Sole minter invariant** (decision 11): only \`apps/api\` holds the private
+signing key. The httpOnly cookie protects the refresh token from XSS; the
+short-lived access token is briefly readable during its lifetime — the
+standard, accepted JWT tradeoff.
+`;
+}
+
+function typedRpcTransportTsMd(): string {
+  return `# The typed-RPC transport
+
+The web reaches the api through \`@starter/api-client\`, a typed Hono RPC
+client (decision 15/17). The transport rule (decision 17b) is:
+
+> **Batch by default; unbatch only where batching would defeat server-side
+> fetch memoization.**
+
+In this TS-monolith scaffold (Vite + TanStack, no server-side rendering),
+there is no server-side \`fetch\` patching context, so the client is
+**fully batched** — \`httpBatchLink\`-equivalent behavior via Hono RPC's
+HTTP transport.
+
+## How it works
+
+\`@starter/api-client\` wraps \`hono/client\`'s \`hc<typeof app>()\` with a
+typed \`createApiClient\` that:
+
+1. Reads the in-memory access token from the auth context.
+2. Attaches it as a \`Bearer\` header on every request.
+3. On 401, calls \`POST /auth/refresh\` (which reads the httpOnly cookie),
+   updates the in-memory token, and retries the original request.
+4. Excludes the \`/auth/*\` routes from refresh-on-401 (the auth surface is
+   the refresh mechanism itself — recursing would loop).
+
+## Diagram
+
+\`\`\`mermaid
+graph TD
+    subgraph "apps/web"
+        TQ["TanStack Query<br/>useQuery / useMutation"]
+        AC["createApiClient<br/>(api-client wrapper)"]
+        AUTH["useAuth<br/>(in-memory access token)"]
+    end
+
+    subgraph "Transport"
+        BATCH["Batch-by-default<br/>(httpBatchLink-equivalent)"]
+        BEARER["Bearer header<br/>(access token)"]
+        REFRESH["Refresh-on-401<br/>POST /auth/refresh<br/>(httpOnly cookie)"]
+    end
+
+    subgraph "apps/api"
+        API["Hono app<br/>hc&lt;typeof app&gt;()"]
+    end
+
+    TQ -->|typed call| AC
+    AC -->|attach token| BEARER
+    AC -->|401 -> refresh -> retry| REFRESH
+    AC -->|batch requests| BATCH
+    BATCH -->|HTTP| API
+    AUTH -->|provides token| AC
+\`\`\`
+
+**The rule is keyed to a runtime property** (server-side \`fetch\` patching),
+not a per-variant label — so it extends to future variants (TanStack Start)
+by checking the same property, not by adding a new carve-out.
+`;
+}
+
+function typedRpcTransportGoMd(): string {
+  return `# The OpenAPI transport
+
+The web reaches the api through a generated TS client from
+\`packages/contract/openapi.yaml\` (decision 19). The contract is
+**explicit** — an OpenAPI spec generated from Go structs and committed.
+
+## How it works
+
+\`packages/contract\` holds the committed \`openapi.yaml\` and generated
+clients. The web uses the generated TS client; mobile (Flutter) uses
+the generated Dart client. Both are generated from the same spec.
+
+The Go api uses **Gin + Huma** (decision 19): operations are defined as
+typed Go input/output structs; Huma validates at runtime and generates
+the OpenAPI spec during build.
+
+## Diagram
+
+\`\`\`mermaid
+graph TD
+    subgraph "apps/web (Next.js)"
+        W["RSC / loaders"]
+        C["generated TS client"]
+    end
+
+    subgraph "packages/contract"
+        O["openapi.yaml<br/>(generated + committed)"]
+    end
+
+    subgraph "apps/api (Gin + Huma)"
+        G["Gin routes<br/>(Go structs)"]
+        H["Huma<br/>(validation + gen)"]
+    end
+
+    W -->|typed call| C
+    C -->|HTTP| G
+    H -->|generates| O
+    C -->|generated from| O
+\`\`\`
+
+**The OpenAPI spec is the spine**: Go structs are the source of truth,
+the spec is generated and committed, clients are generated from it.
+`;
+}
+
+function adrReadmeMd(): string {
+  return `# Architecture Decision Records (ADRs)
+
+This directory is **empty by default** — it's a convention for recording
+your scaffolded project's *own* future architecture decisions, extending
+the ADR pattern this Starter uses internally in \`CONTEXT.md\`.
+
+## The convention
+
+An ADR is a short document that records a single architectural decision:
+the context, the options considered, the decision made, and the
+consequences. Each ADR lives in its own file:
+
+\`\`\`
+docs/adr/
+  0001-record-architecture-decisions.md   (template - copy this)
+  0002-add-a-new-web-variant.md
+  0003-monolith-to-microservices-split.md
+\`\`\`
+
+### File naming
+
+\`<NNNN>-<kebab-case-title>.md\` — a zero-padded number (sequential),
+followed by a short, descriptive title. The number is the ADR's identity;
+the title is for humans.
+
+### Template
+
+Every ADR follows the same structure (adapted from Michael Nygard's
+[Documenting Architecture Decisions](https://adr.github.io/)):
+
+\`\`\`markdown
+# NNNN. <Title>
+
+Date: YYYY-MM-DD
+Status: proposed | accepted | superseded by [ADR NNNN] | deprecated
+
+## Context
+
+What is the issue we're facing? What are the forces at play?
+
+## Decision
+
+What is the change that we're proposing and have agreed to?
+
+## Consequences
+
+What becomes easier or more difficult to do because of this change?
+\`\`\`
+
+## When to write an ADR
+
+Write one when you make a decision that:
+
+- Changes the project's structure (e.g. adding a new workspace, splitting
+  a module into a service per decision 10's pattern).
+- Changes the contract (e.g. adding an operation, switching the
+  contract mechanism).
+- Changes the deployment topology (e.g. monolith to microservices).
+- Adds a new fence from the auth shim (e.g. OAuth, MFA — decision 12).
+- Adds a new web variant (e.g. Next to Vite swap — decision 15).
+
+You don't need an ADR for: adding a route, adding a column, fixing a
+bug. The bar is "this decision shapes the architecture."
+
+## Relationship to CONTEXT.md
+
+This Starter's \`CONTEXT.md\` is the predecessor to this ADR convention —
+it records the decisions that produced *this scaffold*. As you grow your
+project, your ADRs in this directory record the decisions that produce
+*your* architecture. The recursion is intentional: a contributor who
+learns the ADR pattern from this scaffolded project can apply it to any
+project.
+`;
+}
+
+function codeStyleTsMd(): string {
+  return `# Code style
+
+This project uses **Biome** for TypeScript (decision 29): a single tool
+for linting and formatting, replacing ESLint + Prettier. The one-tool
+discipline (parallels decision 8's "one orchestrator") refuses two tools
+when one does the job.
+
+## Biome (TypeScript)
+
+- **Config**: \`biome.json\` at the project root. The config is the
+  *truth*; this doc is the *justification*.
+- **Lint + format**: \`biome check\` lints, \`biome format\` formats.
+  Run \`pnpm lint\` and \`pnpm format\` (wired in each workspace's
+  \`package.json\`).
+- **Why Biome**: zero-config defaults, fast, native, replaces
+  ESLint + Prettier (two tools for one job). The one-tool discipline
+  means there's no ESLint config to drift from the Prettier config.
+- **Pre-commit**: the scaffolded project ships a \`lint-staged\`-equivalent
+  via Biome's own git hooks integration. Run \`biome ci\` in CI to fail
+  on unformatted or unlinted code.
+
+## What this doesn't cover
+
+- **Go**: gofmt + golangci-lint (consensus, no real fork). Not present
+  in this TS-monolith scaffold — Go appears in polyglot shapes (3, 4).
+- **Python**: ruff + \`ruff format\` (shape 4 AI service). Not present
+  in this scaffold — Python appears only in Go-microservices with AI.
+`;
+}
+
+function codeStyleGoMd(): string {
+  return `# Code style
+
+This project uses **gofmt + golangci-lint** for Go (decision 29):
+the consensus Go toolchain, no real fork.
+
+## Go formatting and linting
+
+- **gofmt**: formats Go code canonically. Run \`gofmt -w .\` or use your
+  editor's auto-format.
+- **golangci-lint**: meta-linter that runs dozens of Go linters in parallel.
+  Config in \`.golangci.yml\`. Run \`golangci-lint run\` or \`task lint\`.
+- **Why this pair**: gofmt is the canonical Go formatter (no config needed);
+  golangci-lint is the community consensus meta-linter. One formatter +
+  one meta-linter = the one-tool discipline applied to Go.
+
+## What this doesn't cover
+
+- **TypeScript**: Biome (see the TS-monolith scaffold's code-style doc).
+- **Python**: ruff + \`ruff format\` (shape 4 AI service). Not present
+  in this scaffold — Python appears only in Go-microservices with AI.
+`;
+}
+
+function bestPracticesMd(): string {
+  return `# Best practices (per seam)
+
+Action-oriented guides for the things scaffolded-project users actually
+do. Each seam is one line + a link into the detail.
+
+## Add a module to the modular monolith (decision 27)
+
+The scaffolded \`apps/api\` is a modular monolith: each domain lives in
+\`apps/api/src/internal/<name>/\` with a typed interface, a Hono router,
+and a mountable index.
+
+1. Create \`apps/api/src/internal/<name>/\`.
+2. Write \`<name>.repo.ts\` — the typed interface (the seam):
+
+\`\`\`ts
+export interface ItemsRepo {
+  list(): Promise<Item[]>;
+  create(input: { name: string }): Promise<Item>;
+}
+\`\`\`
+
+3. Write \`<name>.routes.ts\` — the Hono router factory:
+
+\`\`\`ts
+export function makeItemsRoutes(repo: ItemsRepo): Hono {
+  return new Hono()
+    .get('/', ...)
+    .post('/', ...);
+}
+\`\`\`
+
+4. Write \`<name>.repo.drizzle.ts\` — the Drizzle-backed implementation.
+5. Mount it in \`apps/api/src/index.ts\`:
+
+\`\`\`ts
+app.route('/items', makeItemsModule(deps));
+\`\`\`
+
+Behind \`requireAuth\` if it needs an authenticated principal.
+
+## Extend the contract (decisions 3, 17, 18)
+
+The contract is the Hono router's TS type. To add an operation:
+
+1. Add a route to the relevant module's Hono router.
+2. The web client picks it up automatically — \`hc<typeof app>()\`
+   infers the new operation. No codegen, no artifact.
+3. Run \`pnpm typecheck\` in \`apps/web\` to verify the typed client
+   matches (a type error *is* a contract test, decision 22).
+
+## Add a db table (decision 14)
+
+1. Add a schema to \`packages/db/src/schema/<name>.ts\`.
+2. Re-export it from \`packages/db/src/index.ts\`.
+3. Run \`task db:generate\` to emit a migration.
+4. Run \`task migrate\` to apply it.
+
+## Wire a fence from the auth shim (decision 12)
+
+See \`docs/wire-it-in/auth.md\` for the seams (email-verify, password
+reset, MFA, OAuth, RBAC). Each fence is a documented handoff: the shim
+owns the surface, you own the implementation.
+
+## Add a web page (decision 15)
+
+1. Create a route in \`apps/web/src/pages/<name>.tsx\`.
+2. Register it in \`apps/web/src/router.tsx\`.
+3. Reach the api through \`apiClient\` (re-exported from
+   \`apps/web/src/lib/api\`) — no direct fetch, no DB access from the
+   web (decision 15: the api-client is the only door).
+
+## Monolith to microservices (decisions 10, 27)
+
+The example split (extracting \`internal/auth\` to \`apps/api-auth\`) is a
+future ticket. When it lands, the pattern is: copy the example, don't
+refactor. The modular monolith's \`internal/*\` structure is already
+prepared to receive the extraction.
+`;
+}
+
+function antiPatternsMd(): string {
+  return `# Anti-patterns
+
+A "don't do this" list drawn from the **rejected options** recorded in
+every decision in \`CONTEXT.md\`. Each anti-pattern is paired with the
+decision that killed it. This is the unique asset: 30+ decisions of
+"we considered X, rejected because Y" captured in one searchable doc.
+
+A code reviewer asked "why isn't this using X?" can now point here
+instead of reading \`CONTEXT.md\` cover-to-cover.
+
+---
+
+## Decision 1 — Form of the Starter
+
+**Anti-pattern: Kitchen-sink clone.**
+A static template or a pre-built fullstack app that the user forks.
+Rejected: it doesn't scale to variants (mobile yes/no, web variant,
+backend language) and becomes a maintenance burden. The starter is a
+CLI scaffolder (decision 1) that generates projects from prompts, not a
+clone to fork.
+
+## Decision 10 — Microservices scaffolding
+
+**Anti-pattern: Premature N-service decomposition.**
+Splitting \`apps/api\` into many services at scaffold time, before the
+user has any business domains to split. Rejected: the user's own later
+splits follow the example, not a premature decomposition.
+
+**Anti-pattern: Monolith + README bait-and-switch.**
+Shipping a monolith with a README that says "imagine this split into
+services." Rejected: the seam must be real (proven by the example split),
+not aspirational.
+
+**Anti-pattern: Capability split on a business domain.**
+Extracting \`apps/api-users\` as the example split. Rejected: every
+project has auth (a cross-cutting capability), not every project has
+users. The example must be domain-neutral.
+
+## Decision 12 — Auth implementation depth
+
+**Anti-pattern: Genuinely real minimal auth (Option A).**
+Shipping a from-scratch auth implementation that's "real." Rejected:
+real auth has no minimum, and shipping it makes the starter a maintained
+auth framework (every CVE, every rotation bug lands forever).
+
+**Anti-pattern: Documented stub (Option C).**
+A real seam wrapping a fake capability. Rejected: the same bait-and-switch
+as the monolith + README — a real seam with a fake capability is theater.
+
+**Anti-pattern: OAuth/PKCE in the starter.**
+Shipping OAuth/PKCE as a built-in auth flow. Rejected: it broadens the
+shim's scope beyond the four endpoints; OAuth is a fenced "wire it in"
+item, not a scaffolded feature.
+
+## Decision 14 — DB layer
+
+**Anti-pattern: Raw \`pg\` driver + standalone migration runner.**
+Leaving the data layer untyped. Rejected per decision 14: it undercuts the
+typed-TS-spine reason the implicit-contract path exists (decision 3).
+
+**Anti-pattern: Prisma.**
+Non-TS schema language and a generated per-app client fight the
+shared-real-workspace model (decision 9); heaviest runtime of the three.
+Rejected per decision 14.
+
+**Anti-pattern: Dual source of truth (SQL migration + Drizzle TS schema).**
+Hand-authored SQL migrations alongside a Drizzle schema. Rejected per
+decision 14: the real swap-point is the repo layer in \`apps/api\`, not
+the migration history.
+
+## Decision 17 — Implicit-contract mechanism
+
+**Anti-pattern: Codegen from route types.**
+Reintroducing an artifact (a build step per api change). Rejected per
+decision 17: decision 3 said the implicit contract *isn't* an artifact.
+
+**Anti-pattern: Zod + hand-rolled fetch.**
+Splits the source of truth (schemas vs route behavior); bespoke fetch
+plumbing the starter owns forever. Rejected per decision 17.
+
+**Anti-pattern: Bolting tRPC onto Hono.**
+Redundant: Hono already provides typed RPC (\`hc<typeof app>()\`), so
+tRPC would be a competing runtime bolted on. Rejected per decision 18
+(decision 17 cascade).
+
+## Decision 18 — API framework (TS shapes)
+
+**Anti-pattern: API framework as a variant.**
+Making Hono vs Fastify a scaffold-time choice. Rejected: it doubles
+shape 2's CI surface and couples the contract-mechanism axis
+(tRPC vs Hono RPC) to the framework choice.
+
+**Anti-pattern: Express.**
+Audience-safe but older/slower, no native typed RPC, no OpenAPI continuity.
+
+**Anti-pattern: Elysia.**
+Bun-only, runtime-locked — directly fights decision 10's swappable-api
+thesis.
+
+## Decision 19 — Go API framework (polyglot shapes)
+
+**Anti-pattern: Authored-as-source OpenAPI.**
+Keeping OpenAPI hand-authored as the symmetric source of truth.
+Rejected per decision 19: gives up the structs-as-source workflow
+(Huma+Gin) the user actually used and liked.
+
+**Anti-pattern: Introspection (\`GET /verify\` per request).**
+Per-request token verification against a central auth service.
+Rejected per decision 19: opposite failure mode and latency profile
+from shape 2's local-verify (decision 11).
+
+## Decision 20 — AI layer
+
+**Anti-pattern: Single chat-completion shim (Option A).**
+Ships one AI product (chat), wrong for most projects.
+
+**Anti-pattern: RAG toolkit (Option B).**
+Ships one AI product (RAG = embeddings + vector store + chat), wrong for
+most projects *and* imposes "AI = RAG" as the starter's opinion.
+
+**Anti-pattern: Typed seam only, no implementation (Option C).**
+A capability wrapping an empty implementation — the same bait-and-switch
+decision 12 rejected for auth.
+
+**Anti-pattern: Disposable example composition (Option D1).**
+An AI example would impose "AI is a thing this project does" on projects
+that don't, since AI is opt-in unlike auth (decision 21).
+
+## Decision 21 — AI as opt-in
+
+**Anti-pattern: AI always scaffolded-in (original decision 5 reading).**
+"Always available" as zero-friction presence means every non-AI project
+carries an unused \`packages/ai\` with SDK dependencies, contradicting
+the opt-in principle applied to kill the example (decision 20).
+
+## Decision 24 — CLI composition policy
+
+**Anti-pattern: Strict only-2x2 generatable (Option A).**
+Paternalistic; refuses sensible user choices (e.g. Vite for a Go shape
+if Next is the blessed Go web variant), contradicting the "swappable
+peers, trust the seams" philosophy. Rejected per decision 24.
+
+**Anti-pattern: Tiered — blessed 4 + smoke-tested adjacencies (Option C).**
+Most nuanced but the hardest to maintain: defining "sensible" vs
+"nonsensical" is a real ongoing investment, and the smoke-test layer
+is real CI cost. Rejected per decision 24.
+
+## Decision 26 — packages/shared scope
+
+**Anti-pattern: Domain DTOs in \`packages/shared\` with a separate mobile client (Option B).**
+Would require Expo to *not* use the Hono RPC client, but decision 23
+already locked mobile to \`api-client\`. Introduces a *dual* source of
+types (the inferred router + authored shared DTOs) that must agree —
+drift risk. Rejected per decision 26.
+
+## Decision 27 — Monolith structure
+
+**Anti-pattern: Flatter monolith, routes directly on the api (Option B).**
+The monolith-to-microservices upgrade becomes a *structural rewrite*
+(refactor \`apps/api\` into \`internal/*\` with explicit interfaces before
+the example split means anything). Contradicts decision 10's "present
+whether or not a split has happened yet." Rejected per decision 27.
+
+**Anti-pattern: Hybrid — lightweight \`internal/*\` in monolith, strict in microservices (Option C).**
+Fuzzy line (which interfaces need hardening on upgrade?); two shapes
+have *different* module models (loose folders vs strict-interface modules).
+Rejected per decision 27.
+
+## Decision 29 — CI / lint / format
+
+**Anti-pattern: ESLint + Prettier (two tools for one job).**
+Fights the one-tool discipline. Biome replaces both.
+
+**Anti-pattern: Legacy Python toolchain (Black + isort + Flake8).**
+Three tools where one (ruff) suffices. Replaced per decision 29.
+
+**Anti-pattern: Web-only CI blessed matrix (Option A).**
+Declaring mobile a peer (decision 2) while never testing it is the soft
+bait-and-switch the starter rejects elsewhere.
+
+## Decision 32 — Docs standards sub-docs
+
+**Anti-pattern: Single CONVENTIONS.md in each repo's root (Option B).**
+Scope (style + patterns + anti-patterns) gets unwieldy; one file doesn't
+surface the recursion (decision 30's mirror works because each subdir has
+a clear responsibility). Rejected per decision 32.
+
+**Anti-pattern: Inline in the README (Option C).**
+Standards/practices content is the wrong shape for a "what is this
+project" entry point and gets read once and forgotten. The standards
+subdir (decision 32) gives these docs their own home.
 `;
 }
