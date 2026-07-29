@@ -137,7 +137,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './router';
 import { AuthProvider } from './auth';
-import { accessTokenStore } from './lib/api';
+import { apiClient, accessTokenStore } from './lib/api';
 import './app.css';
 
 const queryClient = new QueryClient();
@@ -160,16 +160,15 @@ if (!rootEl) throw new Error('root element not found');
  * router's \`beforeLoad\` guards (which read \`accessTokenStore\`)
  * see the correct state on the very first render — no flash of
  * \`/login\` for a user who is actually still signed in.
+ *
+ * Uses the typed apiClient (decision 15: the api-client is the
+ * web's only door to the api). The authedFetch wrapper short-
+ * circuits \`/auth/*\` so the refresh call won't recurse on 401
+ * and won't attach a (still-null) Bearer header.
  */
 async function bootstrapAuth(): Promise<void> {
-  // \`/api/auth/refresh\` — the same path the api-client uses; Vite's
-  // dev proxy (and the deploy platform's reverse proxy) routes it
-  // to apps/api. \`credentials: 'include'\` sends the httpOnly cookie.
   try {
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-    });
+    const res = await apiClient.auth.refresh.$post({});
     if (res.ok) {
       const data = (await res.json()) as { access?: string };
       if (data.access) accessTokenStore.set(data.access);
@@ -181,7 +180,7 @@ async function bootstrapAuth(): Promise<void> {
 }
 
 void bootstrapAuth().finally(() => {
-  createRoot(rootEl!).render(
+  createRoot(rootEl).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>

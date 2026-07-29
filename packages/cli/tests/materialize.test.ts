@@ -299,8 +299,12 @@ describe('materialize', () => {
       // BEFORE React mounts (so the route guards see the right
       // state on the first render — no flash of /login).
       expect(main).toMatch(/auth\/refresh/);
-      // credentials: 'include' is what sends the httpOnly cookie
-      expect(main).toMatch(/credentials\s*:\s*['"]include['"]/);
+      // Uses the typed apiClient (decision 15: web's only door to the
+      // api), which sends the httpOnly cookie via authedFetch's
+      // `credentials: 'include'`. The api-client's authedFetch
+      // short-circuits /auth/* so the refresh call won't recurse on
+      // 401 (the auth surface is excluded from refresh-on-401).
+      expect(main).toMatch(/apiClient\.auth\.refresh/);
       // The bootstrap completes (or times out) before createRoot
       expect(main).toMatch(/bootstrapAuth|finally\(\(\)\s*=>\s*createRoot/);
     });
@@ -846,6 +850,15 @@ describe('materialize', () => {
       // TanStack Query selector for the items list + the form input aria-label
       // the web app actually exposes (apps/web/src/pages/items.tsx).
       expect(spec).toMatch(/aria-label=["']Item name["']|input[^]*name/);
+    });
+
+    it('E2E spec skips cleanly when DATABASE_URL is unset (mirrors the per-workspace describeDb skip pattern) (issue 09)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const spec = await readFile(join(targetDir, 'e2e/items-flow.spec.ts'), 'utf8');
+      // The skip at the top of the file means `task test` stays runnable
+      // in DB-less environments (the api won't boot without one).
+      expect(spec).toMatch(/test\.skip/);
+      expect(spec).toMatch(/DATABASE_URL/);
     });
 
     it('playwright.config.ts boots the full stack via `task dev` (webServer) and points at the e2e/ dir (issue 09)', async () => {

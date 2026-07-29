@@ -250,13 +250,23 @@ talks to the api over a same-origin path (the httpOnly refresh cookie
 is always first-party). Try it: open http://localhost:5173, click
 **Sign in**, register an account, and you land on the items page.
 
+To run the one E2E:
+
+\`\`\`sh
+# DATABASE_URL must be set in the shell (the scaffolded project's
+# .env is loaded by the api and the web, but the Playwright test
+# process reads process.env directly). Skips cleanly if unset.
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter
+pnpm test:e2e
+\`\`\`
+
 ## Tasks
 
 | Task | What it does |
 |------|--------------|
 | \`task dev\` | Boot web + api in parallel |
 | \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
-| \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`) |
+| \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
 | \`task migrate\` | Apply pending DB migrations |
 | \`task db:generate\` | Generate a new migration from the Drizzle schema |

@@ -58,6 +58,18 @@ function e2eItemsFlowSpec(): string {
 
 import { test, expect, type Page } from '@playwright/test';
 
+// Skip cleanly when DATABASE_URL is not set (mirrors the per-workspace
+// \`describeDb = TEST_URL ? describe : describe.skip\` pattern in
+// packages/auth + apps/api/internal/*). The E2E needs a real Postgres
+// (the api won't boot without it); environments without a DB can
+// still run the rest of the suite (\`task test\`) without this E2E
+// failing the build. The CI matrix (issue 11) provides a Postgres
+// service for the real run.
+test.skip(
+  !process.env.DATABASE_URL,
+  'DATABASE_URL is not set; the E2E needs a running Postgres. Run \`task migrate\` against a real DB and retry.',
+);
+
 // \`baseURL\` is set in playwright.config.ts to the web's URL. The web
 // proxies \`/api/...\` to the api at http://localhost:3000 (see
 // apps/web/vite.config.ts), so the E2E uses the same origin for both
