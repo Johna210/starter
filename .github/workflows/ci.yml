@@ -86,6 +86,12 @@ jobs:
         run: pnpm install
         working-directory: /tmp/test-project
 
+      - name: Run migrations
+        run: task migrate
+        working-directory: /tmp/test-project
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
       - name: Scaffolded project — unit tests
         run: |
           # Continue past workspaces with no test files (vitest exits 1).
@@ -110,12 +116,6 @@ jobs:
         working-directory: /tmp/test-project
 
       # ── E2E (Playwright over the items flow, decision 22) ──────
-      - name: Run migrations
-        run: task migrate
-        working-directory: /tmp/test-project
-        env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
         working-directory: /tmp/test-project
