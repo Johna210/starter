@@ -10,15 +10,17 @@
 // to this module.
 
 import { join } from 'node:path';
+import { type Composition } from '../composition.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeApi(ctx: ProjectContext): Promise<void> {
+export async function writeApi(ctx: ProjectContext, composition?: Composition): Promise<void> {
   const { targetDir } = ctx;
+  const isMicroservices = composition?.topology === 'microservices';
 
-  await writeFileRecursive(join(targetDir, 'apps/api/package.json'), apiPackageJson());
+  await writeFileRecursive(join(targetDir, 'apps/api/package.json'), apiPackageJson(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/api/tsconfig.json'), apiTsconfigJson());
-  await writeFileRecursive(join(targetDir, 'apps/api/.env.example'), apiEnvExample());
-  await writeFileRecursive(join(targetDir, 'apps/api/src/index.ts'), apiIndexTs());
+  await writeFileRecursive(join(targetDir, 'apps/api/.env.example'), apiEnvExample(isMicroservices));
+  await writeFileRecursive(join(targetDir, 'apps/api/src/index.ts'), apiIndexTs(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/api/src/server.ts'), apiServerTs());
   await writeFileRecursive(join(targetDir, 'apps/api/src/config.ts'), apiConfigTs());
   await writeFileRecursive(join(targetDir, 'apps/api/src/internal/items/items.repo.ts'), apiItemsRepoTs());
@@ -26,9 +28,16 @@ export async function writeApi(ctx: ProjectContext): Promise<void> {
   await writeFileRecursive(join(targetDir, 'apps/api/src/internal/items/items.routes.ts'), apiItemsRoutesTs());
   await writeFileRecursive(join(targetDir, 'apps/api/src/internal/items/index.ts'), apiItemsIndexTs());
   await writeFileRecursive(join(targetDir, 'apps/api/src/internal/items/items.repo.test.ts'), apiItemsRepoTestTs());
+
+  // Shape 2 (microservices): apps/api doesn't own auth — it verifies
+  // tokens locally via the shared @starter/auth package. The verify
+  // middleware lives at apps/api/src/middleware/auth.ts.
+  if (isMicroservices) {
+    await writeFileRecursive(join(targetDir, 'apps/api/src/middleware/auth.ts'), apiVerifyMiddlewareTs());
+  }
 }
 
-function apiPackageJson(): string {
+function apiPackageJson(isMicroservices: boolean): string {
   return JSON.stringify(
     {
       name: '@starter/api',
@@ -89,7 +98,39 @@ function apiTsconfigJson(): string {
   ) + '\n';
 }
 
-function apiEnvExample(): string {
+function apiEnvExample(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `# @starter/api — local dev env (git-ignored; copy to .env).
+#
+# Shape 2 (TS-microservices): apps/api is the CONSUMER of tokens, not
+# the minter. apps/api-auth (sibling service) holds the signing key and
+# issues tokens. apps/api only calls verifyToken() from @starter/auth
+# (decision 10/11: the "wrap, not replace" pattern — the shared
+# packages/auth package is the seam, the service just wraps it).
+#
+# JWT_SECRET must still be set here because HS256 is symmetric: apps/api
+# needs the same secret to verify the tokens apps/api-auth signs. The
+# invariant (decision 11) is about who SIGNS, not who holds the key —
+# apps/api never calls signToken / issueTokenPair.
+
+# api runtime config (decision 28). Loaded by src/config.ts via dotenv.
+# PORT — port the api binds to (default 3000).
+# DATABASE_URL — Postgres connection string; consumed via @starter/db's
+# zod schema (decision 14).
+#
+# JWT_SECRET — HS256 verification secret. Must match apps/api-auth's
+# JWT_SECRET (the signing key lives there). Must be at least 32 chars
+# (256 bits). Generate a fresh one with: openssl rand -base64 48
+JWT_SECRET=replace-me-with-a-32-plus-char-random-secret
+
+# Optional: token TTLs in seconds. Must match apps/api-auth's settings.
+# ACCESS_TOKEN_TTL=900
+# REFRESH_TOKEN_TTL=604800
+
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter
+`;
+  }
   return `# api runtime config (decision 28). Loaded by src/config.ts via dotenv.
 #
 # PORT — port the api binds to (default 3000).
@@ -151,7 +192,58 @@ export function loadConfig(): ApiConfig {
 `;
 }
 
-function apiIndexTs(): string {
+function apiIndexTs(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `// @starter/api — Hono app definition (decision 18, 27).
+//
+// Shape 2 (TS-microservices): apps/api is the MAIN API. It owns the
+// business domains (items here) and verifies tokens LOCALLY via the
+// @starter/auth package — no network hop for verification (decision 10/11).
+//
+// Auth surface is served by a SIBLING service, apps/api-auth (separate
+// deployable). The wrap-not-replace pattern: apps/api-auth wraps the
+// same @starter/auth package; both services import the canonical
+// implementation. Sole-minter invariant (decision 11): apps/api-auth
+// is the only process that calls signToken / issueTokenPair; apps/api
+// only calls verifyToken().
+//
+// Modular monolith (decision 27): each domain lives in
+// src/internal/<name>/ as a self-contained module with a typed
+// interface, mounted at a prefix on the root router.
+//
+// buildApp() is called at server startup, not at import time. This
+// means type-only imports of this file (e.g. from the api-client) are
+// cheap: no env parsing, no Postgres connection.
+//
+// Auth wiring (decision 10/11/12/16):
+// - /items is wrapped in a \`requireAuth\`-protected subtree: every
+//   request to /items must carry a valid Bearer access token, else 401.
+//   The protected subtree is its own Hono() with
+//   \`.use('*', requireAuth(authConfig))\` so the items module itself
+//   stays auth-agnostic.
+// - requireAuth verifies via the shared @starter/auth package
+//   (decision 10: wrap, not replace). The config is read once and
+//   threaded through.
+
+import { Hono } from 'hono';
+import { readAuthConfig } from '@starter/auth';
+import { makeItemsModule } from './internal/items/index.js';
+import { requireAuth } from './middleware/auth.js';
+
+export function buildApp() {
+  const authConfig = readAuthConfig();
+
+  return new Hono()
+    .get('/health', (c) => c.json({ status: 'ok' }))
+    .route(
+      '/items',
+      new Hono().use('*', requireAuth(authConfig)).route('/', makeItemsModule()),
+    );
+}
+
+export type AppType = ReturnType<typeof buildApp>;
+`;
+  }
   return `// @starter/api — Hono app definition (decision 18, 27).
 //
 // This file is the package's main entry. The api-client (and any other
@@ -407,5 +499,54 @@ describeDb('makeDrizzleItemsRepo (real DB)', () => {
     expect(items[0]?.name).toBe('first');
   });
 });
+`;
+}
+
+function apiVerifyMiddlewareTs(): string {
+  return `// @starter/api — verifyToken middleware (decision 10, 11, 27).
+//
+// Shape 2 (TS-microservices): apps/api is the TOKEN CONSUMER, not the
+// minter. apps/api-auth (sibling service) holds the signing key and
+// issues tokens; apps/api only calls verifyToken() from the shared
+// @starter/auth package (decision 10: wrap, not replace — the package
+// is the seam, the services are deployable wrappers around it).
+//
+// Protects a route (or a router subtree) by requiring a valid access
+// token in the \`Authorization: Bearer …\` header. On success the
+// verified \`userId\` is set on the Hono context (\`c.get('userId')\`)
+// so downstream handlers can use it.
+//
+// 401 (with a JSON error body) on any failure — missing header, wrong
+// shape, invalid signature, expired token. The exact reason is hidden
+// from the response to avoid leaking validation rules to attackers.
+
+import type { Context, MiddlewareHandler } from 'hono';
+import { verifyToken, type AuthConfig } from '@starter/auth';
+
+export type AuthContext = Context & {
+  // set by the middleware on success
+  get(key: 'userId'): string | undefined;
+  set(key: 'userId', value: string): void;
+};
+
+export function requireAuth(config: AuthConfig): MiddlewareHandler {
+  return async (c, next) => {
+    const header = c.req.header('Authorization');
+    if (!header || !header.startsWith('Bearer ')) {
+      return c.json({ error: 'missing or invalid Authorization header' }, 401);
+    }
+    const token = header.slice('Bearer '.length).trim();
+    if (token.length === 0) {
+      return c.json({ error: 'missing or invalid Authorization header' }, 401);
+    }
+    try {
+      const payload = await verifyToken<{ sub: string }>(token, config);
+      c.set('userId', String(payload.sub));
+      await next();
+    } catch {
+      return c.json({ error: 'invalid or expired token' }, 401);
+    }
+  };
+}
 `;
 }

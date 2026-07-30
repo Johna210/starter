@@ -5,23 +5,24 @@ import { type ProjectContext, writeFileRecursive } from './_shared.js';
 export async function writeDocs(ctx: ProjectContext, composition: Composition): Promise<void> {
   const { targetDir } = ctx;
   const isTs = composition.backend === 'ts';
+  const isMicroservices = composition.topology === 'microservices';
   const isAiOn = composition.ai === 'on';
 
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/contract-spine.md'),
-    isTs ? contractSpineTsMd() : contractSpineGoMd(),
+    isTs ? contractSpineTsMd(isMicroservices) : contractSpineGoMd(),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/modular-monolith.md'),
-    modularMonolithMd(),
+    modularMonolithMd(isMicroservices),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/auth-subtree.md'),
-    authSubtreeMd(),
+    authSubtreeMd(isMicroservices),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/typed-rpc-transport.md'),
-    isTs ? typedRpcTransportTsMd() : typedRpcTransportGoMd(),
+    isTs ? typedRpcTransportTsMd(isMicroservices) : typedRpcTransportGoMd(),
   );
 
   await writeFileRecursive(join(targetDir, 'docs/wire-it-in/auth.md'), wireItInAuthMd());
@@ -33,7 +34,7 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
 
   await writeFileRecursive(join(targetDir, 'docs/standards/code-style.md'),
     isTs ? codeStyleTsMd() : codeStyleGoMd());
-  await writeFileRecursive(join(targetDir, 'docs/standards/best-practices.md'), bestPracticesMd());
+  await writeFileRecursive(join(targetDir, 'docs/standards/best-practices.md'), bestPracticesMd(isMicroservices));
   await writeFileRecursive(join(targetDir, 'docs/standards/anti-patterns.md'), antiPatternsMd());
 }
 
@@ -164,7 +165,78 @@ surface; you own the provider.
 `;
 }
 
-function contractSpineTsMd(): string {
+function contractSpineTsMd(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `# Your Hono RPC contract spine (TS-microservices)
+
+This is your contract spine: the API agreement between \`apps/web\` and
+the backend services in this **TS-microservices** scaffold (decisions 3,
+9, 17, 18, 10, 11).
+
+## How it works
+
+In TS-only shapes (this one), the contract is **implicit** — shared TS
+types, no artifact. The api framework is **Hono** (decision 18), so the
+contract mechanism is **Hono RPC** (\`hc<typeof app>()\`): each router's
+TS type *is* the wire contract, inferred end-to-end (inputs, outputs,
+error shapes), no codegen, no separate source of truth to drift.
+
+There are **two** services in this shape (decision 10's example split):
+
+- \`apps/api\` — main API; mounts \`/items\`; verifies tokens locally.
+- \`apps/api-auth\` — sole minter; mounts \`/auth/*\`; wraps \`@starter/auth\`.
+
+\`@starter/api-client\` exports two typed clients: \`createApiClient\`
+(for \`apps/api\`) and \`createApiAuthClient\` (for \`apps/api-auth\`).
+The vite dev proxy routes \`/api/auth/*\` to the auth service and
+\`/api/*\` to the main api — the browser sees one \`/api\` endpoint.
+
+## Diagram
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/web (Vite + TanStack)"
+        W["web pages<br/>(TanStack Query/Router)"]
+        AC["@starter/api-client<br/>createApiClient + createApiAuthClient"]
+    end
+
+    subgraph "apps/api (Hono on Node :3000)"
+        A1["AppType<br/>(items + health)"]
+        M1["internal/items"]
+        R1["Hono app<br/>.route('/items')"]
+    end
+
+    subgraph "apps/api-auth (Hono on Node :3001)"
+        A2["AppType<br/>(/auth/*)"]
+        M2["internal/auth<br/>(sole minter)"]
+        R2["Hono app<br/>.route('/auth')"]
+    end
+
+    subgraph "packages/"
+        DB["@starter/db<br/>(Drizzle schema)"]
+        AUTH["@starter/auth<br/>(argon2 + jose — shared seam)"]
+    end
+
+    W -->|typed call| AC
+    AC -->|/api/*| R1
+    AC -->|/api/auth/*| R2
+    R1 -->|mounts| M1
+    R2 -->|mounts| M2
+    A1 <-->|type inference| AC
+    A2 <-->|type inference| AC
+    M1 -->|verifyToken| AUTH
+    M2 -->|sign + verify| AUTH
+    M1 -->|uses| DB
+    M2 -->|uses| DB
+\`\`\`
+
+**Sole-minter invariant** (decision 11): only \`apps/api-auth\` calls
+\`signToken\` / \`issueTokenPair\`. \`apps/api\` calls only
+\`verifyToken()\` from the same \`@starter/auth\` package — no network
+hop for verification. The shared package is the seam; the services are
+deployable wrappers around it (decision 10: wrap, not replace).
+`;
+  }
   return `# Your Hono RPC contract spine
 
 This is your contract spine: the single API agreement between \`apps/web\`
@@ -270,7 +342,97 @@ from it.
 `;
 }
 
-function modularMonolithMd(): string {
+function modularMonolithMd(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `# The example split (TS-microservices)
+
+This scaffold is a **TS-microservices** shape (decision 10): the
+example split has already happened. \`apps/api-auth\` is a separate
+deployable that owns the \`/auth/*\` HTTP surface and the signing
+key. \`apps/api\` is the main API — it owns the business domains
+(items here) and verifies tokens locally via the shared
+\`@starter/auth\` package (no network hop).
+
+## The split axis: capability, not domain
+
+The example split extracts a **capability** (auth/IAM), not a business
+domain. Every project has auth; not every project has "users" as a
+domain (decision 10). Capability splits are real and domain-neutral
+— the user carves their own domain splits by copying the example.
+
+The split follows the **wrap, not replace** pattern (decision 10):
+\`apps/api-auth\` wraps \`@starter/auth\` (it doesn't replace it).
+The package remains shared across both services. The only thing
+that moved is the HTTP surface + the signing key.
+
+## How it works
+
+\`apps/api/src/internal/<name>/\` still contains one module per
+domain (items here). \`apps/api-auth/src/internal/auth/\` contains
+the auth module (the same code that lived in \`apps/api\`'s
+\`internal/auth/\` in the monolith shape, just relocated as its own
+deployable).
+
+\`apps/api/src/index.ts\` mounts items behind a \`requireAuth\`
+middleware that uses the shared \`@starter/auth\` package:
+
+\`\`\`ts
+app
+  .get('/health', (c) => c.json({ status: 'ok' }))
+  .route('/items',
+    new Hono().use('*', requireAuth(authConfig)).route('/', makeItemsModule()))
+\`\`\`
+
+\`apps/api-auth/src/index.ts\` mounts the auth routes:
+
+\`\`\`ts
+app
+  .get('/health', (c) => c.json({ status: 'ok' }))
+  .route('/auth', makeAuthModule(authConfig))
+\`\`\`
+
+## Diagram
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/api (verifier)"
+        I1["src/index.ts"]
+        ITEMS["internal/items/"]
+        MW["src/middleware/auth.ts<br/>(requireAuth → verifyToken)"]
+    end
+
+    subgraph "apps/api-auth (sole minter)"
+        I2["src/index.ts"]
+        AUTH["internal/auth/<br/>repo.ts + routes.ts"]
+    end
+
+    subgraph "packages/"
+        DB["@starter/db"]
+        AUTH_PKG["@starter/auth<br/>(shared seam)"]
+    end
+
+    I1 -->|route('/items')| ITEMS
+    I1 -->|use('*', requireAuth)| MW
+    MW -->|verifyToken| AUTH_PKG
+    I2 -->|route('/auth')| AUTH
+    AUTH -->|issueTokenPair / rotateTokenPair| AUTH_PKG
+    ITEMS -->|imports| DB
+    AUTH -->|imports| DB
+\`\`\`
+
+**Sole-minter invariant** (decision 11): only \`apps/api-auth\` calls
+\`signToken\` / \`issueTokenPair\`. \`apps/api\` calls only
+\`verifyToken()\` from the same package. The JWT_SECRET is set in
+both services (HS256 is symmetric), but only one process ever
+*signs*.
+
+**Monolith → microservices** (decision 10, 27): copy this example.
+Extract any \`internal/<cap>/\` module into a sibling
+\`apps/api-<cap>\` service. The modular monolith's internal-module
+structure is already prepared for this — the upgrade is a
+seam-preserving extraction, not a refactor.
+`;
+  }
   return `# The modular monolith
 
 This scaffold is a **modular monolith** (decision 27): \`apps/api\` has the
@@ -328,7 +490,90 @@ graph LR
 `;
 }
 
-function authSubtreeMd(): string {
+function authSubtreeMd(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `# The auth subtree (TS-microservices)
+
+This scaffold ships an **auth shim** (decision 12): a thin typed layer
+over vetted libraries that owns the surface of auth (token shape,
+argon2id params, the four HTTP endpoints, refresh rotation) — not the
+crypto. In **shape 2** (TS-microservices) the auth surface is served by
+a dedicated sibling service: \`apps/api-auth\`.
+
+## How it works
+
+\`apps/api-auth\` is the **sole minter** of JWTs in this monorepo
+(decision 11): only this service calls \`signToken\` /
+\`issueTokenPair\`. \`apps/api\` (the main API) calls only
+\`verifyToken()\` from the same shared \`@starter/auth\` package — no
+network hop for verification (decision 10: wrap, not replace — the
+package is the seam, the services are deployable wrappers).
+
+Both services import the same \`@starter/auth\` package and both set
+\`JWT_SECRET\` (HS256 is symmetric — verification needs the same key
+as signing). The invariant is about who *signs*, not who holds the
+key. The web-auth flow (decision 16) is uniform:
+
+1. \`POST /auth/login\` (or \`/register\`) on \`apps/api-auth\` verifies
+   the password via \`@starter/auth\` (argon2id), issues a token pair,
+   and sets an **httpOnly refresh cookie** + returns a short-lived
+   **access token** in the body.
+2. \`apps/web\` stores the access token **in memory** (SPA storage model).
+3. \`@starter/api-client\` attaches the access token as a **Bearer
+   header** to every api call (via the vite proxy, the same \`/api\`
+   base URL routes to both services).
+4. On 401, the api-client calls \`POST /auth/refresh\` on the auth
+   service (the httpOnly cookie is sent automatically), rotates the
+   refresh token, and retries the original request.
+
+## Diagram
+
+\`\`\`mermaid
+sequenceDiagram
+    participant Browser as apps/web (SPA)
+    participant Client as @starter/api-client
+    participant Auth as apps/api-auth<br/>(:3001, sole minter)
+    participant API as apps/api<br/>(:3000, verifier)
+    participant Shim as packages/auth<br/>(shared seam)
+
+    Note over Browser,API: Login
+
+    Browser->>Auth: POST /api/auth/login {email, password}
+    Auth->>Shim: verifyPassword (argon2id)
+    Shim-->>Auth: ok
+    Auth->>Shim: issueTokenPair (jose)
+    Shim-->>Auth: {access, refresh}
+    Auth-->>Browser: {access, refresh, userId}<br/>Set-Cookie: refresh (httpOnly)
+    Note right of Browser: access token stored in memory
+
+    Note over Browser,API: API call (Bearer)
+
+    Browser->>Client: apiClient.items.$get()
+    Client->>Browser: read in-memory access token
+    Client->>API: GET /api/items<br/>Authorization: Bearer <access>
+    API->>Shim: verifyToken (jose)
+    Shim-->>API: ok
+    API-->>Client: items list
+
+    Note over Browser,API: Refresh on 401
+
+    Client->>API: GET /api/items -> 401 (access expired)
+    Client->>Auth: POST /api/auth/refresh<br/>(httpOnly cookie sent automatically)
+    Auth->>Shim: rotateTokenPair
+    Shim-->>Auth: {access, refresh}
+    Auth-->>Client: {access, refresh}<br/>Set-Cookie: refresh (httpOnly)
+    Client->>API: GET /api/items (retry)<br/>Authorization: Bearer <new access>
+    API-->>Client: items list
+\`\`\`
+
+**Sole minter invariant** (decision 11): only \`apps/api-auth\` calls
+\`signToken\` / \`issueTokenPair\`. \`apps/api\` calls only
+\`verifyToken()\` from the same package — local, no network hop. The
+httpOnly cookie protects the refresh token from XSS; the short-lived
+access token is briefly readable during its lifetime — the standard,
+accepted JWT tradeoff.
+`;
+  }
   return `# The auth subtree
 
 This scaffold ships an **auth shim** (decision 12): a thin typed layer over
@@ -397,7 +642,86 @@ standard, accepted JWT tradeoff.
 `;
 }
 
-function typedRpcTransportTsMd(): string {
+function typedRpcTransportTsMd(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `# The typed-RPC transport (TS-microservices)
+
+The web reaches the backends through \`@starter/api-client\`, which
+exports **two** typed Hono RPC clients (decision 15/17/10):
+
+- \`createApiClient\` — typed against \`apps/api\`'s \`AppType\` (items + health)
+- \`createApiAuthClient\` — typed against \`apps/api-auth\`'s \`AppType\` (auth/*)
+
+Both are built from the router's TS type via \`hc<typeof app>()\`.
+The transport rule (decision 17b) is:
+
+> **Batch by default; unbatch only where batching would defeat server-side
+> fetch memoization.**
+
+In this TS scaffold (Vite + TanStack, no server-side rendering), there
+is no server-side \`fetch\` patching context, so the client is
+**fully batched** — Hono RPC's HTTP transport.
+
+## How it works
+
+The vite dev proxy routes \`/api/auth/*\` to \`apps/api-auth\` (port 3001)
+and \`/api/*\` to \`apps/api\` (port 3000). Both clients use the same
+\`/api\` base URL; the proxy handles the routing. The httpOnly refresh
+cookie stays first-party (same origin) in both dev and production.
+
+\`@starter/api-client\` wraps \`hono/client\`'s \`hc<typeof app>()\` with
+typed factory functions. The auth wiring (apps/web/src/lib/api.ts):
+
+1. Reads the in-memory access token from the auth context.
+2. Attaches it as a \`Bearer\` header on every non-auth request.
+3. On 401, calls \`POST /auth/refresh\` via the auth client (which
+   reads the httpOnly cookie), updates the in-memory token, and
+   retries the original request.
+4. Excludes the \`/auth/*\` routes from refresh-on-401 (the auth
+   surface is the refresh mechanism itself — recursing would loop).
+
+## Diagram
+
+\`\`\`mermaid
+graph TD
+    subgraph "apps/web"
+        TQ["TanStack Query<br/>useQuery / useMutation"]
+        AC["@starter/api-client<br/>createApiClient + createApiAuthClient"]
+        AUTH["useAuth<br/>(in-memory access token)"]
+    end
+
+    subgraph "Transport"
+        BEARER["Bearer header<br/>(access token)"]
+        REFRESH["Refresh-on-401<br/>POST /auth/refresh<br/>(httpOnly cookie)"]
+    end
+
+    subgraph "Vite proxy"
+        PROXY["/api/auth/* → :3001<br/>/api/* → :3000"]
+    end
+
+    subgraph "apps/api-auth (:3001)"
+        AUTH_SVC["Hono app<br/>.route('/auth')"]
+    end
+
+    subgraph "apps/api (:3000)"
+        API_SVC["Hono app<br/>.route('/items')"]
+    end
+
+    TQ -->|typed call| AC
+    AC -->|attach token| BEARER
+    AC -->|401 -> refresh -> retry| REFRESH
+    BEARER -->|HTTP| PROXY
+    REFRESH -->|HTTP| PROXY
+    PROXY -->|/api/auth/*| AUTH_SVC
+    PROXY -->|/api/*| API_SVC
+    AUTH -->|provides token| AC
+\`\`\`
+
+**The rule is keyed to a runtime property** (server-side \`fetch\` patching),
+not a per-variant label — so it extends to future variants (TanStack Start)
+by checking the same property, not by adding a new carve-out.
+`;
+  }
   return `# The typed-RPC transport
 
 The web reaches the api through \`@starter/api-client\`, a typed Hono RPC
@@ -634,7 +958,100 @@ the consensus Go toolchain, no real fork.
 `;
 }
 
-function bestPracticesMd(): string {
+function bestPracticesMd(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `# Best practices (per seam) — TS-microservices
+
+Action-oriented guides for the things scaffolded-project users actually
+do in the **TS-microservices** shape. Each seam is one line + a link
+into the detail.
+
+## Add a module to the main api (decision 27)
+
+The scaffolded \`apps/api\` is a modular monolith with the example split
+already done. Each domain lives in \`apps/api/src/internal/<name>/\` with
+a typed interface, a Hono router, and a mountable index.
+
+1. Create \`apps/api/src/internal/<name>/\`.
+2. Write \`<name>.repo.ts\` — the typed interface (the seam):
+
+\`\`\`ts
+export interface ItemsRepo {
+  list(): Promise<Item[]>;
+  create(input: { name: string }): Promise<Item>;
+}
+\`\`\`
+
+3. Write \`<name>.routes.ts\` — the Hono router factory.
+4. Write \`<name>.repo.drizzle.ts\` — the Drizzle-backed implementation.
+5. Mount it in \`apps/api/src/index.ts\`:
+
+\`\`\`ts
+app.route('/items',
+  new Hono().use('*', requireAuth(authConfig)).route('/', makeItemsModule()));
+\`\`\`
+
+Behind \`requireAuth\` if it needs an authenticated principal.
+
+## Extend the contract (decisions 3, 17, 18)
+
+There are **two** typed surfaces in this shape:
+
+- \`apps/api\`'s \`AppType\` — items + health. Consumed by
+  \`createApiClient\` in \`@starter/api-client\`.
+- \`apps/api-auth\`'s \`AppType\` — /auth/*. Consumed by
+  \`createApiAuthClient\` in \`@starter/api-client\`.
+
+To add an operation:
+
+1. Add a route to the relevant service's Hono router.
+2. The web client picks it up automatically — \`hc<typeof app>()\`
+   infers the new operation. No codegen, no artifact.
+3. Run \`pnpm typecheck\` in \`apps/web\` to verify the typed client
+   matches (a type error *is* a contract test, decision 22).
+
+## Add a db table (decision 14)
+
+1. Add a schema to \`packages/db/src/schema/<name>.ts\`.
+2. Re-export it from \`packages/db/src/index.ts\`.
+3. Run \`task db:generate\` to emit a migration.
+4. Run \`task migrate\` to apply it.
+
+## Wire a fence from the auth shim (decision 12)
+
+See \`docs/wire-it-in/auth.md\` for the seams (email-verify, password
+reset, MFA, OAuth, RBAC). Each fence is a documented handoff: the shim
+owns the surface, you own the implementation. The fence lands in
+\`apps/api-auth/src/internal/auth/\` (the sole minter).
+
+## Add a web page (decision 15)
+
+1. Create a route in \`apps/web/src/pages/<name>.tsx\`.
+2. Register it in \`apps/web/src/router.tsx\`.
+3. Reach the api through \`apiClient\` (items) or \`apiAuthClient\`
+   (auth) — both re-exported from \`apps/web/src/lib/api\`. No direct
+   fetch, no DB access from the web (decision 15: the api-client is
+   the only door).
+
+## Split another capability out of apps/api (decisions 10, 27)
+
+The example split (extracting auth → apps/api-auth) is the pattern.
+To extract another capability:
+
+1. Create \`apps/api/src/internal/<cap>/\` in apps/api (interface +
+   routes + drizzle impl).
+2. When it's ready to split, copy the module into a new sibling
+   service: \`apps/api-<cap>/\`. Wrap the shared package (if any).
+3. Mount it in \`apps/api-<cap>/src/index.ts\`.
+4. Update the vite proxy in \`apps/web/vite.config.ts\` to route
+   \`/api/<cap>/*\` to the new service.
+5. Update \`@starter/api-client\` to export a typed client for the
+   new service.
+
+The modular monolith's \`internal/*\` structure is already prepared
+for this — the upgrade is a seam-preserving extraction, not a refactor.
+`;
+  }
   return `# Best practices (per seam)
 
 Action-oriented guides for the things scaffolded-project users actually

@@ -10,7 +10,7 @@
 // (`materialize`, `UnimplementedCompositionError`, `ProjectContext`)
 // is re-exported here unchanged so external imports keep working.
 
-import { type Composition, describeComposition, isImplemented } from './composition.js';
+import { type Composition, describeComposition, isImplemented, isTsMicroservicesVite } from './composition.js';
 // Re-exported to preserve the public API: external code imports
 // `ProjectContext` from '../src/materialize.js'.
 export type { ProjectContext } from './materialize/_shared.js';
@@ -23,6 +23,7 @@ import { writeDb } from './materialize/db.js';
 import { writeAuth } from './materialize/auth.js';
 import { writeApi } from './materialize/api.js';
 import { writeApiAuth } from './materialize/api-auth.js';
+import { writeApiAuthService } from './materialize/api-auth-service.js';
 import { writeDocs } from './materialize/docs.js';
 import { writeE2e } from './materialize/e2e.js';
 
@@ -42,7 +43,11 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   if (!isImplemented(composition)) {
     throw new UnimplementedCompositionError(composition);
   }
-  await writeTsMonolithVite(ctx, composition);
+  if (isTsMicroservicesVite(composition)) {
+    await writeTsMicroservicesVite(ctx, composition);
+  } else {
+    await writeTsMonolithVite(ctx, composition);
+  }
 }
 
 async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition): Promise<void> {
@@ -55,6 +60,21 @@ async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition
   await writeDb(ctx);
 
   await writeApiClient(ctx);
+  await writeAuth(ctx);
+  await writeDocs(ctx, composition);
+  await writeE2e(ctx);
+}
+
+async function writeTsMicroservicesVite(ctx: ProjectContext, composition: Composition): Promise<void> {
+  await writeRoot(ctx, composition);
+  await writeWeb(ctx, composition);
+  await writeApi(ctx, composition);
+  await writeApiAuthService(ctx);
+
+  await writeShared(ctx);
+  await writeDb(ctx);
+
+  await writeApiClient(ctx, composition);
   await writeAuth(ctx);
   await writeDocs(ctx, composition);
   await writeE2e(ctx);

@@ -9,24 +9,26 @@
 // functions are private to this module.
 
 import { join } from 'node:path';
+import { type Composition } from '../composition.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeWeb(ctx: ProjectContext): Promise<void> {
+export async function writeWeb(ctx: ProjectContext, composition?: Composition): Promise<void> {
   const { targetDir } = ctx;
+  const isMicroservices = composition?.topology === 'microservices';
 
   await writeFileRecursive(join(targetDir, 'apps/web/package.json'), webPackageJson());
   await writeFileRecursive(join(targetDir, 'apps/web/tsconfig.json'), webTsconfigJson());
-  await writeFileRecursive(join(targetDir, 'apps/web/vite.config.ts'), webViteConfig());
+  await writeFileRecursive(join(targetDir, 'apps/web/vite.config.ts'), webViteConfig(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/index.html'), webIndexHtml());
   await writeFileRecursive(join(targetDir, 'apps/web/.env.example'), webEnvExample());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/main.tsx'), webMainTsx());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/main.tsx'), webMainTsx(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/app.css'), webAppCss());
   await writeFileRecursive(join(targetDir, 'apps/web/src/router.tsx'), webRouter());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/auth.tsx'), webAuthTsx());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/auth.tsx'), webAuthTsx(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/pages/index.tsx'), webIndexPage());
   await writeFileRecursive(join(targetDir, 'apps/web/src/pages/items.tsx'), webItemsPage());
   await writeFileRecursive(join(targetDir, 'apps/web/src/pages/login.tsx'), webLoginPage());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/lib/api.ts'), webLibApi());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/lib/api.ts'), webLibApi(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/config.ts'), webConfigTs());
 }
 
@@ -90,7 +92,36 @@ function webTsconfigJson(): string {
   ) + '\n';
 }
 
-function webViteConfig(): string {
+function webViteConfig(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+// Shape 2 (TS-microservices): the vite proxy routes to TWO backends.
+// - /api/auth/* → apps/api-auth (port 3001) — the sole minter (decision 11)
+// - /api/*     → apps/api (port 3000) — the main API, verifies locally
+// The web code is identical to shape 1: it still calls /api/auth/login,
+// /api/items, etc. The proxy keeps the cookie first-party (same origin).
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api/auth': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\\/api/, ''),
+      },
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\\/api/, ''),
+      },
+    },
+  },
+});
+`;
+  }
   return `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -130,7 +161,55 @@ function webIndexHtml(): string {
 `;
 }
 
-function webMainTsx(): string {
+function webMainTsx(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterProvider } from '@tanstack/react-router';
+import { router } from './router';
+import { AuthProvider } from './auth';
+import { apiAuthClient, accessTokenStore } from './lib/api';
+import './app.css';
+
+const queryClient = new QueryClient();
+
+const rootEl = document.getElementById('root');
+if (!rootEl) throw new Error('root element not found');
+
+/**
+ * Bootstrap session restore (issue 09 / decision 16).
+ *
+ * Shape 2 (TS-microservices): the refresh call goes through
+ * \`apiAuthClient\` (typed against @starter/api-auth). The vite proxy
+ * routes /api/auth/* to apps/api-auth on port 3001.
+ */
+async function bootstrapAuth(): Promise<void> {
+  try {
+    const res = await apiAuthClient.auth.refresh.$post({});
+    if (res.ok) {
+      const data = (await res.json()) as { access?: string };
+      if (data.access) accessTokenStore.set(data.access);
+    }
+  } catch {
+    // Network error / no cookie / etc — leave the user signed out;
+    // the route guard handles the redirect.
+  }
+}
+
+void bootstrapAuth().finally(() => {
+  createRoot(rootEl).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+});
+`;
+  }
   return `import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -457,7 +536,71 @@ export function LoginPage() {
 `;
 }
 
-function webAuthTsx(): string {
+function webAuthTsx(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `// @starter/web — auth context (issue 06, decision 16).
+//
+// Shape 2 (TS-microservices): the auth surface (register/login/refresh/
+// logout) is served by a separate service (apps/api-auth). This hook
+// uses the \`apiAuthClient\` (typed against @starter/api-auth's AppType)
+// to call the auth service. The vite proxy routes /api/auth/* to
+// apps/api-auth on port 3001; from the browser's perspective it's all
+// one /api endpoint.
+//
+// The SPA variant's auth model: the access token lives **in memory**
+// (per decision 16, the SPA storage model). The refresh token is in
+// an httpOnly cookie set by /auth/login + /auth/refresh, so it
+// survives a page reload without being readable from JS.
+//
+// Auth state is held in a module-level store (see
+// \`accessTokenStore\` in src/lib/api.ts) and surfaced to React via
+// \`useSyncExternalStore\`. The store is the same one the api-client's
+// custom-fetch reads from, so a successful signIn() in this provider
+// is immediately visible to the next api call \u2014 no race, no prop
+// drilling, no context provider wrapping every fetch.
+
+import { useCallback, useSyncExternalStore } from 'react';
+import { apiAuthClient, accessTokenStore } from './lib/api';
+
+export interface AuthState {
+  accessToken: string | null;
+  signIn(input: { email: string; password: string }): Promise<void>;
+  signOut(): Promise<void>;
+}
+
+export function useAuth(): AuthState {
+  const accessToken = useSyncExternalStore(
+    accessTokenStore.subscribe,
+    accessTokenStore.get,
+    accessTokenStore.get,
+  );
+
+  const signIn = useCallback(async ({ email, password }: { email: string; password: string }) => {
+    const res = await apiAuthClient.auth.login.$post({ json: { email, password } });
+    if (!res.ok) {
+      throw new Error('Invalid email or password');
+    }
+    const data = await res.json();
+    accessTokenStore.set(data.access);
+  }, []);
+
+  const signOut = useCallback(async () => {
+    accessTokenStore.set(null);
+    try {
+      await apiAuthClient.auth.logout.$post({});
+    } catch {
+      // Already cleared locally; nothing else to do.
+    }
+  }, []);
+
+  return { accessToken, signIn, signOut };
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+`;
+  }
   return `// @starter/web — auth context (issue 06, decision 16).
 //
 // The SPA variant's auth model: the access token lives **in memory**
@@ -590,8 +733,118 @@ declare module '@tanstack/react-router' {
 `;
 }
 
-function webLibApi(): string {
-  return `// @starter/web \u2014 typed entry point to the api, with auth wired in.
+function webLibApi(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `// @starter/web — typed entry point to the backends, with auth wired in.
+//
+// Shape 2 (TS-microservices): there are TWO backend services reachable
+// from the web. The vite proxy (vite.config.ts) routes /api/auth/* to
+// apps/api-auth and /api/* to apps/api. The api-client package exports
+// a createApiClient for the main api (items) and a createApiAuthClient
+// for the auth service — both are typed Hono RPC clients (decision 17/18).
+//
+// This file wires the auth surface (apiClient.auth.*) to reach the
+// auth service while keeping the same /api/auth/* URL path the web code
+// already uses. The vite proxy handles the actual routing; from the
+// browser's perspective there's still one api at /api.
+//
+// Auth wiring (issue 06, decision 16):
+// - The custom \`authedFetch\` is the \`fetch\` Hono RPC uses internally.
+//   Before every request it attaches \`Authorization: Bearer <token>\` (if
+//   we have one), then sends. On a 401 (excluding /auth/* endpoints),
+//   it transparently POSTs /auth/refresh via the auth client (which
+//   sends the httpOnly cookie via \`credentials: 'include'\`), updates
+//   the in-memory access token, and retries the original request once.
+// - The \`accessTokenStore\` is a tiny pub/sub singleton the
+//   AuthProvider's useAuth() hook subscribes to via useSyncExternalStore.
+//   No React context wraps every api call; the fetch reads from the
+//   store directly, so signIn() → next api call is race-free.
+
+import { createApiClient, createApiAuthClient } from '@starter/api-client';
+import { config } from '../config';
+
+type Listener = () => void;
+
+class AccessTokenStore {
+  private token: string | null = null;
+  private listeners = new Set<Listener>();
+
+  get = (): string | null => this.token;
+
+  set(next: string | null): void {
+    if (this.token === next) return;
+    this.token = next;
+    for (const l of this.listeners) l();
+  }
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+}
+
+export const accessTokenStore = new AccessTokenStore();
+
+const AUTH_PATH_PREFIX = '/auth/';
+
+function isAuthEndpoint(url: string): boolean {
+  return url.includes(AUTH_PATH_PREFIX);
+}
+
+const authedFetch: typeof fetch = async (input, init) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const skipAuth = isAuthEndpoint(url);
+
+  const headers = new Headers(init?.headers);
+  const token = accessTokenStore.get();
+  if (token && !skipAuth && !headers.has('Authorization')) {
+    headers.set('Authorization', \`Bearer \${token}\`);
+  }
+  const authedInit: RequestInit = { ...init, headers, credentials: 'include' };
+
+  const response = await fetch(input, authedInit);
+
+  if (response.status === 401 && !skipAuth && token) {
+    // Use the typed auth client to refresh — keeps the typed-RPC
+    // discipline (decision 17/18) and ensures the same authedFetch
+    // wrapper handles the request (credentials: 'include' for the
+    // httpOnly cookie).
+    const refreshRes = await apiAuthClient.auth.refresh.$post({}).catch(() => null);
+    if (refreshRes && refreshRes.ok) {
+      const data = (await refreshRes.json()) as { access?: string };
+      if (data.access) {
+        accessTokenStore.set(data.access);
+        const retryHeaders = new Headers(init?.headers);
+        retryHeaders.set('Authorization', \`Bearer \${data.access}\`);
+        return fetch(input, { ...init, headers: retryHeaders, credentials: 'include' });
+      }
+    }
+    accessTokenStore.set(null);
+  }
+
+  return response;
+};
+
+/**
+ * Main api client (items + health). Typed against @starter/api's
+ * AppType. Reached through the same VITE_API_URL base; the vite proxy
+ * routes /api/* (non-auth) to apps/api on port 3000.
+ */
+export const apiClient = createApiClient(config.apiUrl, { fetch: authedFetch });
+
+/**
+ * Auth service client (register/login/refresh/logout). Typed against
+ * @starter/api-auth's AppType. Reached through the same VITE_API_URL
+ * base; the vite proxy routes /api/auth/* to apps/api-auth on port 3001.
+ *
+ * Exposed as \`apiAuthClient\` so the auth hook (src/auth.tsx) can call
+ * apiAuthClient.auth.login.$post(...) etc. The pages don't use this
+ * directly — they go through useAuth().
+ */
+export const apiAuthClient = createApiAuthClient(config.apiUrl, { fetch: authedFetch });
+`;
+  }
+  return `// @starter/web — typed entry point to the api, with auth wired in.
 //
 // Builds the apiClient (Hono RPC, decision 17/18) from the runtime-resolved
 // base URL in ./config and gives the rest of the app a single canonical
@@ -609,7 +862,7 @@ function webLibApi(): string {
 // - The \`accessTokenStore\` is a tiny pub/sub singleton the
 //   AuthProvider's useAuth() hook subscribes to via useSyncExternalStore.
 //   No React context wraps every api call; the fetch reads from the
-//   store directly, so signIn() \u2192 next api call is race-free.
+//   store directly, so signIn() → next api call is race-free.
 
 import { createApiClient } from '@starter/api-client';
 import { config } from '../config';

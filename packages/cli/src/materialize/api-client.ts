@@ -6,17 +6,25 @@
 // writeApiClient(ctx); template functions are private to this module.
 
 import { join } from 'node:path';
+import { type Composition } from '../composition.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeApiClient(ctx: ProjectContext): Promise<void> {
+export async function writeApiClient(ctx: ProjectContext, composition?: Composition): Promise<void> {
   const { targetDir } = ctx;
+  const isMicroservices = composition?.topology === 'microservices';
 
-  await writeFileRecursive(join(targetDir, 'packages/api-client/package.json'), apiClientPackageJson());
+  await writeFileRecursive(
+    join(targetDir, 'packages/api-client/package.json'),
+    apiClientPackageJson(isMicroservices),
+  );
   await writeFileRecursive(join(targetDir, 'packages/api-client/tsconfig.json'), apiClientTsconfigJson());
-  await writeFileRecursive(join(targetDir, 'packages/api-client/src/index.ts'), apiClientIndexTs());
+  await writeFileRecursive(
+    join(targetDir, 'packages/api-client/src/index.ts'),
+    apiClientIndexTs(isMicroservices),
+  );
 }
 
-function apiClientPackageJson(): string {
+function apiClientPackageJson(isMicroservices: boolean): string {
   return JSON.stringify(
     {
       name: '@starter/api-client',
@@ -28,7 +36,9 @@ function apiClientPackageJson(): string {
         typecheck: 'tsc --noEmit',
       },
       dependencies: {
-        '@starter/api': 'workspace:*',
+        ...(isMicroservices
+          ? { '@starter/api': 'workspace:*', '@starter/api-auth': 'workspace:*' }
+          : { '@starter/api': 'workspace:*' }),
         hono: '^4.6.0',
       },
       devDependencies: {
@@ -62,7 +72,51 @@ function apiClientTsconfigJson(): string {
   ) + '\n';
 }
 
-function apiClientIndexTs(): string {
+function apiClientIndexTs(isMicroservices: boolean): string {
+  if (isMicroservices) {
+    return `// @starter/api-client — typed Hono RPC clients (decision 17, 18, 10).
+//
+// Shape 2 (TS-microservices): there are TWO backend services, so the
+// api-client exports two typed clients — one for the main api
+// (@starter/api, items + health) and one for the auth service
+// (@starter/api-auth, register/login/refresh/logout). Both are
+// Hono RPC clients (\`hc<typeof app>()\`) with end-to-end type
+// inference (decision 17/18: the router's TS type is the contract).
+//
+// Decision 10/11: the auth service is the SOLE MINTER; apps/api
+// verifies tokens locally via the shared @starter/auth package.
+// The web reaches both services through the same vite proxy
+// (VITE_API_URL is the same-origin path; the proxy routes
+// /api/auth/* to api-auth and /api/* to api).
+//
+// Optional \`Hono RPC options\` (a \`fetch\` override, headers, etc.) are
+// forwarded to \`hc()\` so the web can plug in a Bearer-attaching,
+// refresh-on-401 fetch without forking the api-client (issue 06).
+
+import { hc, type ClientRequestOptions } from 'hono/client';
+import type { AppType as ApiAppType } from '@starter/api';
+import type { AppType as ApiAuthAppType } from '@starter/api-auth';
+
+export type ApiClient = ReturnType<typeof hc<ApiAppType>>;
+export type ApiAuthClient = ReturnType<typeof hc<ApiAuthAppType>>;
+
+export function createApiClient(
+  baseUrl: string,
+  options?: ClientRequestOptions,
+): ApiClient {
+  return hc<ApiAppType>(baseUrl, options);
+}
+
+export function createApiAuthClient(
+  baseUrl: string,
+  options?: ClientRequestOptions,
+): ApiAuthClient {
+  return hc<ApiAuthAppType>(baseUrl, options);
+}
+
+export type { ApiAppType, ApiAuthAppType };
+`;
+  }
   return `// @starter/api-client — typed Hono RPC client (decision 17, 18).
 //
 // The web (apps/web) and mobile (apps/mobile) reach apps/api through this
