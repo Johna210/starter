@@ -1,9 +1,10 @@
 # CI — starter repo + scaffolded project tests.
 #
-# Per issue 11 the matrix currently has one row (TS-monolith).
-# Adding a new blessed combination (issue 18) is a single config
-# change: add a row to the matrix and a matching step in the
-# "scaffolded project" job.
+# Per issue 11 the matrix started with one row (TS-monolith).
+# Per issue 12 shape 2 (TS-microservices) was added. Adding a new
+# blessed combination (issue 18) is a single config change: add a
+# row to the matrix and a matching step in the "scaffolded project"
+# job.
 #
 # Per decision 22 the test pyramid is unit + contract + one E2E
 # over items. The starter repo's own tests (contract.sh + vitest)
@@ -32,8 +33,9 @@ jobs:
       matrix:
         include:
           - shape: ts-monolith
-            # Extensible: add `go-monolith`, `ts-microservices`,
-            # `go-microservices` rows here per issue 18.
+          - shape: ts-microservices
+          # Extensible: add `go-monolith`, `go-microservices` rows
+          # here per issue 18.
 
     services:
       postgres:
@@ -80,8 +82,8 @@ jobs:
       - name: Build CLI
         run: pnpm --filter create-fs-starter build
 
-      - name: Materialize test project
-        run: npx tsx ci/materialize-test-project.ts /tmp/test-project
+      - name: Materialize test project (${{ matrix.shape }})
+        run: npx tsx ci/materialize-test-project.ts /tmp/test-project ${{ matrix.shape }}
 
       - name: Install dependencies (test project)
         run: pnpm install
@@ -98,9 +100,9 @@ jobs:
           # Continue past workspaces with no test files (vitest exits 1).
           # Only fail if a workspace has tests that actually fail.
           FAILED=0
-          for ws in apps/web apps/api packages/auth packages/shared packages/db; do
+          for ws in apps/web apps/api apps/api-auth packages/auth packages/shared packages/db; do
             echo "::group::test $ws"
-            if ls "$ws"/src/**/*.test.{ts,tsx,js,jsx} >/dev/null 2>&1; then
+            if [ -d "$ws" ] && ls "$ws"/src/**/*.test.{ts,tsx,js,jsx} >/dev/null 2>&1; then
               (cd "$ws" && pnpm test) || FAILED=1
             else
               echo "No test files — skipping"
@@ -114,10 +116,12 @@ jobs:
 
       - name: Scaffolded project — typecheck (compile-time contract)
         run: |
-          for ws in packages/db packages/api-client apps/api apps/web; do
-            echo "::group::typecheck $ws"
-            (cd "$ws" && pnpm typecheck)
-            echo "::endgroup::"
+          for ws in packages/db packages/api-client apps/api apps/api-auth apps/web; do
+            if [ -d "$ws" ]; then
+              echo "::group::typecheck $ws"
+              (cd "$ws" && pnpm typecheck)
+              echo "::endgroup::"
+            fi
           done
         working-directory: /tmp/test-project
 

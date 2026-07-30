@@ -12,9 +12,9 @@ describe('composition', () => {
       expect(isImplemented(TS_MONOLITH_VITE)).toBe(true);
     });
 
-    it('returns false for TS + microservices (shape 2 — not yet implemented)', () => {
+    it('returns true for TS + microservices (shape 2 — implemented in issue #12)', () => {
       const c: Composition = { ...TS_MONOLITH_VITE, topology: 'microservices' };
-      expect(isImplemented(c)).toBe(false);
+      expect(isImplemented(c)).toBe(true);
     });
 
     it('returns false for Go + monolith (shape 3 — not yet implemented)', () => {

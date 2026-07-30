@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Composition, TS_MONOLITH_VITE } from '../src/composition.js';
+import { type Composition, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
 import { materialize, UnimplementedCompositionError } from '../src/materialize.js';
 
 describe('materialize', () => {
@@ -1068,11 +1068,12 @@ describe('materialize', () => {
       );
     });
 
-    it('throws UnimplementedCompositionError for TS + microservices', async () => {
+    it('materializes TS + microservices (shape 2 is implemented in issue #12)', async () => {
       const composition: Composition = { ...TS_MONOLITH_VITE, topology: 'microservices' };
-      await expect(materialize({ targetDir, name: 'test-app' }, composition)).rejects.toBeInstanceOf(
-        UnimplementedCompositionError,
-      );
+      // Shape 2 is now implemented — the materializer should succeed.
+      await expect(
+        materialize({ targetDir, name: 'test-app' }, composition),
+      ).resolves.toBeUndefined();
     });
 
     it('throws UnimplementedCompositionError when web variant differs', async () => {
@@ -1103,6 +1104,286 @@ describe('materialize', () => {
       );
       const entries = await readdir(targetDir);
       expect(entries, 'target dir should be empty after a failed materialize').toEqual([]);
+    });
+  });
+
+  // ── Shape 2: TS-microservices (issue #12) ─────────────────────────
+  // Per decision 10/11: apps/api-auth is the sole minter, apps/api
+  // verifies locally via the shared @starter/auth package. The example
+  // split extracts a capability (auth/IAM), not a business domain.
+  describe('TS-microservices + Vite+TanStack + no-mobile + no-AI (shape 2, issue #12)', () => {
+    it('writes the root scaffold files', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      for (const file of ['package.json', 'pnpm-workspace.yaml', 'Taskfile.yml', '.gitignore', 'README.md']) {
+        const s = await stat(join(targetDir, file));
+        expect(s.isFile(), `${file} should be a file`).toBe(true);
+      }
+    });
+
+    it('writes apps/api with items module but NO internal/auth (sole-minter invariant)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const apiDir = join(targetDir, 'apps/api');
+      expect((await stat(apiDir)).isDirectory()).toBe(true);
+      // Items module is here
+      for (const file of [
+        'package.json',
+        'tsconfig.json',
+        'src/index.ts',
+        'src/internal/items/items.repo.ts',
+        'src/internal/items/items.routes.ts',
+        'src/internal/items/index.ts',
+      ]) {
+        expect((await stat(join(apiDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+      // Auth module is NOT here (it's in apps/api-auth now)
+      const authDir = join(apiDir, 'src/internal/auth');
+      try {
+        await stat(authDir);
+        expect.fail('apps/api/src/internal/auth should NOT exist in shape 2');
+      } catch (err) {
+        expect((err as NodeJS.ErrnoException).code).toBe('ENOENT');
+      }
+    });
+
+    it('apps/api buildApp mounts /items with requireAuth and NO /auth route (sole-minter invariant)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const idx = await readFile(join(targetDir, 'apps/api/src/index.ts'), 'utf8');
+      // /items is mounted
+      expect(idx).toMatch(/\.route\(\s*['"]\/items['"]/);
+      // requireAuth middleware is applied
+      expect(idx).toContain('requireAuth');
+      // /auth is NOT mounted in apps/api
+      expect(idx).not.toMatch(/\.route\(\s*['"]\/auth['"]/);
+      // makeAuthModule is NOT called (the minter lives in api-auth)
+      expect(idx).not.toContain('makeAuthModule');
+    });
+
+    it('apps/api has a verify-only middleware (no signing) that uses @starter/auth', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const mw = await readFile(join(targetDir, 'apps/api/src/middleware/auth.ts'), 'utf8');
+      // Uses verifyToken from @starter/auth
+      expect(mw).toContain('verifyToken');
+      expect(mw).toContain('@starter/auth');
+      // Does NOT use signToken / issueTokenPair (sole minter invariant)
+      expect(mw).not.toContain('signToken');
+      expect(mw).not.toContain('issueTokenPair');
+      // Exports requireAuth
+      expect(mw).toMatch(/export\s+function\s+requireAuth/);
+    });
+
+    it('writes apps/api-auth as a separate deployable (the sole minter)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const dir = join(targetDir, 'apps/api-auth');
+      expect((await stat(dir)).isDirectory(), 'apps/api-auth should exist').toBe(true);
+      for (const file of [
+        'package.json',
+        'tsconfig.json',
+        '.env.example',
+        'src/index.ts',
+        'src/server.ts',
+        'src/config.ts',
+        'src/internal/auth/auth.repo.ts',
+        'src/internal/auth/auth.repo.drizzle.ts',
+        'src/internal/auth/auth.routes.ts',
+        'src/internal/auth/index.ts',
+        'src/internal/auth/auth.repo.test.ts',
+      ]) {
+        expect((await stat(join(dir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+    });
+
+    it('apps/api-auth is the sole minter: exposes /auth routes and uses signToken/issueTokenPair', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const idx = await readFile(join(targetDir, 'apps/api-auth/src/index.ts'), 'utf8');
+      // /auth is mounted
+      expect(idx).toMatch(/\.route\(\s*['"]\/auth['"]/);
+      // makeAuthModule is called
+      expect(idx).toContain('makeAuthModule');
+      // /items is NOT mounted in api-auth
+      expect(idx).not.toMatch(/\.route\(\s*['"]\/items['"]/);
+      // The routes use signToken / issueTokenPair (the minting surface)
+      const routes = await readFile(
+        join(targetDir, 'apps/api-auth/src/internal/auth/auth.routes.ts'),
+        'utf8',
+      );
+      for (const path of ['/register', '/login', '/refresh', '/logout']) {
+        expect(routes, `api-auth routes should mount ${path}`).toContain(`'${path}'`);
+      }
+      expect(routes).toContain('hashPassword');
+      expect(routes).toContain('verifyPassword');
+      expect(routes).toContain('issueTokenPair');
+      expect(routes).toContain('rotateTokenPair');
+      expect(routes).toContain('revokeRefreshToken');
+    });
+
+    it('apps/api-auth/package.json declares @starter/api-auth and the right deps', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'apps/api-auth/package.json'), 'utf8'),
+      );
+      expect(pkg.name).toBe('@starter/api-auth');
+      // Wraps @starter/auth (decision 10: wrap, not replace)
+      expect(pkg.dependencies['@starter/auth']).toBe('workspace:*');
+      // Uses Drizzle (for users + refresh_tokens)
+      expect(pkg.dependencies['@starter/db']).toBe('workspace:*');
+      expect(pkg.dependencies['drizzle-orm']).toEqual(expect.any(String));
+    });
+
+    it('packages/auth is shared between apps/api and apps/api-auth (decision 10: wrap, not replace)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const authPkg = join(targetDir, 'packages/auth');
+      expect((await stat(authPkg)).isDirectory()).toBe(true);
+      // The same package is used by both services
+      const apiPkg = JSON.parse(
+        await readFile(join(targetDir, 'apps/api/package.json'), 'utf8'),
+      );
+      const apiAuthPkg = JSON.parse(
+        await readFile(join(targetDir, 'apps/api-auth/package.json'), 'utf8'),
+      );
+      expect(apiPkg.dependencies['@starter/auth']).toBe('workspace:*');
+      expect(apiAuthPkg.dependencies['@starter/auth']).toBe('workspace:*');
+    });
+
+    it('packages/api-client exports two typed clients (createApiClient + createApiAuthClient)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const idx = await readFile(
+        join(targetDir, 'packages/api-client/src/index.ts'),
+        'utf8',
+      );
+      // Two clients for the two services
+      expect(idx).toContain('createApiClient');
+      expect(idx).toContain('createApiAuthClient');
+      // Both are Hono RPC
+      expect(idx).toContain('hono/client');
+      expect(idx).toMatch(/hc</);
+      // Typed against both AppTypes
+      expect(idx).toContain('@starter/api');
+      expect(idx).toContain('@starter/api-auth');
+    });
+
+    it('packages/api-client/package.json depends on both @starter/api and @starter/api-auth', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const pkg = JSON.parse(
+        await readFile(join(targetDir, 'packages/api-client/package.json'), 'utf8'),
+      );
+      expect(pkg.dependencies['@starter/api']).toBe('workspace:*');
+      expect(pkg.dependencies['@starter/api-auth']).toBe('workspace:*');
+    });
+
+    it('apps/web vite proxy routes /api/auth/* to api-auth and /api/* to api', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const vite = await readFile(join(targetDir, 'apps/web/vite.config.ts'), 'utf8');
+      // Two proxy entries
+      expect(vite).toMatch(/\/api\/auth/);
+      expect(vite).toContain('3001'); // api-auth port
+      expect(vite).toContain('3000'); // api port
+    });
+
+    it('apps/web auth hook uses apiAuthClient (the auth-service client), not apiClient', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const auth = await readFile(join(targetDir, 'apps/web/src/auth.tsx'), 'utf8');
+      // Uses apiAuthClient for auth surface
+      expect(auth).toContain('apiAuthClient');
+      expect(auth).toMatch(/apiAuthClient\.auth\.(login|logout|register|refresh)/);
+    });
+
+    it('apps/web bootstrapAuth uses apiAuthClient.auth.refresh', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const main = await readFile(join(targetDir, 'apps/web/src/main.tsx'), 'utf8');
+      // Bootstrap calls refresh through the auth client
+      expect(main).toContain('apiAuthClient');
+      expect(main).toMatch(/apiAuthClient\.auth\.refresh/);
+    });
+
+    it('root Taskfile boots web + api + api-auth in parallel (shape 2)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      // Three dev targets
+      expect(tf).toMatch(/^  dev:web:/m);
+      expect(tf).toMatch(/^  dev:api:/m);
+      expect(tf).toMatch(/^  dev:api-auth:/m);
+      // The dev meta-task references all three
+      const devBlock = tf.match(/^  dev:\n(?:    .+\n)+/m);
+      expect(devBlock, 'dev: task should exist').toBeTruthy();
+      expect(devBlock![0]).toMatch(/dev:web/);
+      expect(devBlock![0]).toMatch(/dev:api/);
+      expect(devBlock![0]).toMatch(/dev:api-auth/);
+    });
+
+    it('root README documents the TS-microservices shape and the sole-minter invariant', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      // Names the shape
+      expect(readme).toMatch(/shape 2|TS-microservices|microservices/i);
+      // Names the example split
+      expect(readme).toMatch(/example split/i);
+      // Names the sole-minter invariant
+      expect(readme).toMatch(/sole minter|sole.*mint/i);
+      // Has the four sections (decision 33)
+      expect(readme).toMatch(/quickstart/i);
+      expect(readme).toMatch(/what you just saw/i);
+      expect(readme).toMatch(/where to extend/i);
+      expect(readme).toMatch(/how to grow/i);
+    });
+
+    it('docs/architecture/contract-spine.md is composition-specific (mentions both services)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const md = await readFile(join(targetDir, 'docs/architecture/contract-spine.md'), 'utf8');
+      // Mermaid diagram
+      expect(md).toMatch(/```mermaid/);
+      // Names both services
+      expect(md).toMatch(/apps\/api/);
+      expect(md).toMatch(/apps\/api-auth/);
+      // Names the sole-minter invariant
+      expect(md).toMatch(/sole.*mint|sole minter/i);
+    });
+
+    it('docs/architecture/modular-monolith.md is renamed to the example split for shape 2', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const md = await readFile(
+        join(targetDir, 'docs/architecture/modular-monolith.md'),
+        'utf8',
+      );
+      expect(md).toMatch(/```mermaid/);
+      // Names the example split
+      expect(md).toMatch(/example split/i);
+      // Names the capability axis (not domain)
+      expect(md).toMatch(/capability/i);
+    });
+
+    it('docs/architecture/auth-subtree.md shows the sole-minter invariant (decision 11)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const md = await readFile(join(targetDir, 'docs/architecture/auth-subtree.md'), 'utf8');
+      expect(md).toMatch(/```mermaid/);
+      // Sole minter invariant is documented
+      expect(md).toMatch(/sole.*mint|sole minter/i);
+      // The auth service is named
+      expect(md).toMatch(/apps\/api-auth/);
+    });
+
+    it('apps/api .env.example documents JWT_SECRET (for verification, not minting)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const env = await readFile(join(targetDir, 'apps/api/.env.example'), 'utf8');
+      expect(env).toContain('JWT_SECRET');
+      // Documents that api is the verifier, not the minter
+      expect(env).toMatch(/verif|consum/i);
+    });
+
+    it('apps/api-auth .env.example documents JWT_SECRET (the sole-minter secret)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const env = await readFile(join(targetDir, 'apps/api-auth/.env.example'), 'utf8');
+      expect(env).toContain('JWT_SECRET');
+      // Documents the sole-minter role
+      expect(env).toMatch(/sole minter|minter|signing/i);
+    });
+
+    it('docs/standards/best-practices.md documents splitting another capability (decision 10)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE);
+      const md = await readFile(join(targetDir, 'docs/standards/best-practices.md'), 'utf8');
+      // Names the split pattern
+      expect(md).toMatch(/split/i);
+      // Names the capability axis
+      expect(md).toMatch(/capability/i);
     });
   });
 });

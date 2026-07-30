@@ -26,7 +26,7 @@ export interface Composition {
   ai: Ai;
 }
 
-/** The single currently-implemented composition (issue #3). */
+/** Shape 1: TS-monolith + Vite+TanStack (issue #3). */
 export const TS_MONOLITH_VITE: Composition = {
   backend: 'ts',
   topology: 'monolith',
@@ -35,14 +35,37 @@ export const TS_MONOLITH_VITE: Composition = {
   ai: 'off',
 };
 
+/** Shape 2: TS-microservices + Vite+TanStack (issue #12). */
+export const TS_MICROSERVICES_VITE: Composition = {
+  backend: 'ts',
+  topology: 'microservices',
+  web: 'vite',
+  mobile: 'none',
+  ai: 'off',
+};
+
 /** Returns true iff the CLI can actually materialize this composition. */
 export function isImplemented(c: Composition): boolean {
+  return isTsMonolithVite(c) || isTsMicroservicesVite(c);
+}
+
+export function isTsMonolithVite(c: Composition): boolean {
   return (
     c.backend === TS_MONOLITH_VITE.backend &&
     c.topology === TS_MONOLITH_VITE.topology &&
     c.web === TS_MONOLITH_VITE.web &&
     c.mobile === TS_MONOLITH_VITE.mobile &&
     c.ai === TS_MONOLITH_VITE.ai
+  );
+}
+
+export function isTsMicroservicesVite(c: Composition): boolean {
+  return (
+    c.backend === TS_MICROSERVICES_VITE.backend &&
+    c.topology === TS_MICROSERVICES_VITE.topology &&
+    c.web === TS_MICROSERVICES_VITE.web &&
+    c.mobile === TS_MICROSERVICES_VITE.mobile &&
+    c.ai === TS_MICROSERVICES_VITE.ai
   );
 }
 

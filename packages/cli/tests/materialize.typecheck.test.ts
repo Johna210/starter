@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { TS_MONOLITH_VITE } from '../src/composition.js';
+import { TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
 import { materialize } from '../src/materialize.js';
 
 const exec = promisify(execFile);
@@ -47,6 +47,32 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
         'packages/db',
         'packages/api-client',
         'apps/api',
+        'apps/web',
+      ]) {
+        const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
+          cwd: join(targetDir, ws),
+        });
+        expect(stdout + stderr, `tsc failed in ${ws}`).not.toMatch(/error TS/);
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'the materialized TS-microservices project typechecks end-to-end (issue #12)',
+    async () => {
+      // 1. Materialize
+      await materialize({ targetDir, name: 'e2e-app' }, TS_MICROSERVICES_VITE);
+
+      // 2. Install
+      await exec('pnpm', ['install', '--prefer-offline'], { cwd: targetDir });
+
+      // 3. Typecheck each workspace (shape 2 has apps/api-auth too)
+      for (const ws of [
+        'packages/db',
+        'packages/api-client',
+        'apps/api',
+        'apps/api-auth',
         'apps/web',
       ]) {
         const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
