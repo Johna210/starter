@@ -222,6 +222,79 @@ describe('Go-monolith + Next + no-mobile + no-AI (shape 3 base, issue #13)', () 
     }
   });
 
+  it('packages/contract is the only package: committed openapi.yaml + generated TS client + Dart client (decision 9/19)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const contractDir = join(targetDir, 'packages/contract');
+    for (const file of [
+      'openapi.yaml',
+      'README.md',
+      'package.json',
+      'tsconfig.json',
+      'scripts/generate-ts-client.mjs',
+      'src/types.ts',
+      'src/client.ts',
+      'src/index.ts',
+      'test/generated.test.ts',
+      'clients/dart/pubspec.yaml',
+      'clients/dart/lib/openapi_client.dart',
+    ]) {
+      expect((await stat(join(contractDir, file))).isFile(), `${file} should exist`).toBe(true);
+    }
+  });
+
+  it('committed openapi.yaml documents /items + the four /auth endpoints (generated from the Go structs)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const yaml = await readFile(join(targetDir, 'packages/contract/openapi.yaml'), 'utf8');
+    expect(yaml).toMatch(/^paths:/m);
+    for (const p of ['/items', '/auth/register', '/auth/login', '/auth/refresh', '/auth/logout']) {
+      expect(yaml, `openapi.yaml should document ${p}`).toContain(`  ${p}:`);
+    }
+    // Item schema is described (the schema the clients are generated from)
+    expect(yaml).toMatch(/components:|schemas:/);
+    expect(yaml).toMatch(/Item/);
+    // The protected /items operations declare the bearer security requirement
+    expect(yaml).toMatch(/bearerAuth/);
+    expect(yaml).toMatch(/securitySchemes/);
+  });
+
+  it('generated TS client is downstream of the committed spec: types for Item + calls for every endpoint', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const types = await readFile(join(targetDir, 'packages/contract/src/types.ts'), 'utf8');
+    expect(types).toMatch(/export\s+interface\s+Item\b/);
+    const client = await readFile(join(targetDir, 'packages/contract/src/client.ts'), 'utf8');
+    for (const ep of ['/items', '/auth/register', '/auth/login', '/auth/refresh', '/auth/logout']) {
+      expect(client, `client.ts should expose ${ep}`).toContain(`'${ep}'`);
+    }
+    expect(client).toMatch(/list: async|create: async/);
+  });
+
+  it('TS client package declares @starter/contract and the generator script (regeneration = commit flow, decision 19)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const pkg = JSON.parse(
+      await readFile(join(targetDir, 'packages/contract/package.json'), 'utf8'),
+    );
+    expect(pkg.name).toBe('@starter/contract');
+    expect(pkg.scripts.generate).toMatch(/generate-ts-client/);
+    expect(pkg.scripts.typecheck).toBe('tsc --noEmit');
+  });
+
+  it('Dart client exists for the Flutter mobile ticket (17) and models the items domain', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const dart = await readFile(join(targetDir, 'packages/contract/clients/dart/lib/openapi_client.dart'), 'utf8');
+    expect(dart).toMatch(/class\s+Item\b/);
+    expect(dart).toMatch(/\/items/);
+    const pub = await readFile(join(targetDir, 'packages/contract/clients/dart/pubspec.yaml'), 'utf8');
+    expect(pub).toMatch(/name\s*:/);
+  });
+
+  it('contract test validates the committed openapi.yaml against the running server (decision 22/19)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const ct = await readFile(join(targetDir, 'apps/api/contract_test.go'), 'utf8');
+    expect(ct).toMatch(/openapi\.yaml/);
+    expect(ct).toMatch(/httptest/);
+    expect(ct).toMatch(/NewRecorder/);
+  });
+
   it('ships the Go test files: items repo unit tests, auth shim unit tests (decision 22)', async () => {
     await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
     const apiDir = join(targetDir, 'apps/api');
