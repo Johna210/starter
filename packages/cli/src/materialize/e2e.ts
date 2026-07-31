@@ -18,17 +18,51 @@
 // writes, which states the discipline explicitly.
 
 import { join } from 'node:path';
+import { type Composition } from '../composition.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeE2e(ctx: ProjectContext): Promise<void> {
+export async function writeE2e(ctx: ProjectContext, composition: Composition): Promise<void> {
   const { targetDir } = ctx;
+  const isGo = composition.backend === 'go';
 
-  await writeFileRecursive(join(targetDir, 'e2e/items-flow.spec.ts'), e2eItemsFlowSpec());
-  await writeFileRecursive(join(targetDir, 'playwright.config.ts'), e2ePlaywrightConfig());
-  await writeFileRecursive(join(targetDir, 'docs/test-strategy.md'), e2eTestStrategyMd());
+  await writeFileRecursive(join(targetDir, 'e2e/items-flow.spec.ts'), e2eItemsFlowSpec(isGo));
+  await writeFileRecursive(join(targetDir, 'playwright.config.ts'), e2ePlaywrightConfig(isGo));
+  await writeFileRecursive(join(targetDir, 'docs/test-strategy.md'), e2eTestStrategyMd(isGo));
 }
 
-function e2eItemsFlowSpec(): string {
+function e2eItemsFlowSpec(isGo: boolean): string {
+  const authFlowNote = isGo
+    ? `Log in via the UI (the Next SSR variant's access-token-in-cookie +
+//      refresh-in-httpOnly-cookie flow, decision 16).`
+    : `Log in via the UI (the SPA's access-token-in-memory + refresh-
+//      in-httpOnly-cookie flow, decision 16).`;
+  const createNote = isGo
+    ? `Create a new item via the form (the client component's typed
+//      api-client call, decision 15/19).`
+    : `Create a new item via the form (TanStack Query mutation
+//      against the typed api-client, decision 15/18).`;
+  const appearNote = isGo
+    ? `Assert the new item appears in the list (router.refresh() re-ran the
+//      server component, which refetched through the api-client).`
+    : `Assert the new item appears in the list (TanStack Query
+//      invalidation refreshed it).`;
+  const proxyNote = isGo
+    ? `// \`baseURL\` is set in playwright.config.ts to the web's URL. The web
+// rewrites \`/api/...\` to the api at http://localhost:3000 (see
+// apps/web/next.config.ts), so the E2E uses the same origin for both
+// the UI and the api calls — same-origin means the httpOnly refresh
+// cookie is first-party end-to-end.`
+    : `// \`baseURL\` is set in playwright.config.ts to the web's URL. The web
+// proxies \`/api/...\` to the api at http://localhost:3000 (see
+// apps/web/vite.config.ts), so the E2E uses the same origin for both
+// the UI and the api calls — same-origin means the httpOnly refresh
+// cookie is first-party end-to-end.`;
+  const envNote = isGo
+    ? `provides a Postgres service; local devs set DATABASE_URL in
+// apps/api/.env per the README's Quickstart.`
+    : `provides a Postgres service; local devs set DATABASE_URL in
+// apps/api/.env + packages/db/.env per the README's Quickstart.`;
+
   return `// e2e/items-flow.spec.ts — the starter's one and only E2E (decision 22).
 //
 // Exercises the full spine the \`items\` demo exists to prove (decision
@@ -36,22 +70,18 @@ function e2eItemsFlowSpec(): string {
 // talking to a real Postgres. The flow is
 //
 //   1. Register a user (via the api, so the test owns its data).
-//   2. Log in via the UI (the SPA's access-token-in-memory + refresh-
-//      in-httpOnly-cookie flow, decision 16).
+//   2. ${authFlowNote}
 //   3. Land on /items and assert the test item isn't in the list yet
 //      (the "known state" branch of the spec — we don't need a clean
 //      DB because every test run uses a unique item name).
-//   4. Create a new item via the form (TanStack Query mutation
-//      against the typed api-client, decision 15/18).
-//   5. Assert the new item appears in the list (TanStack Query
-//      invalidation refreshed it).
+//   4. ${createNote}
+//   5. ${appearNote}
 //   6. Reload the page (real HTTP GET, refetch from the api).
 //   7. Assert the item is still there (proves web→api→db persistence).
 //
 // Requires DATABASE_URL to be set — the api won't boot without it,
 // and \`task migrate\` must have been run. The CI matrix (issue 11)
-// provides a Postgres service; local devs set DATABASE_URL in
-// apps/api/.env + packages/db/.env per the README's Quickstart.
+// ${envNote}
 //
 // Per-feature E2Es are NOT this test's job. See ../docs/test-strategy.md
 // for the one-E2E-only discipline (decision 22).
@@ -70,11 +100,7 @@ test.skip(
   'DATABASE_URL is not set; the E2E needs a running Postgres. Run \`task migrate\` against a real DB and retry.',
 );
 
-// \`baseURL\` is set in playwright.config.ts to the web's URL. The web
-// proxies \`/api/...\` to the api at http://localhost:3000 (see
-// apps/web/vite.config.ts), so the E2E uses the same origin for both
-// the UI and the api calls — same-origin means the httpOnly refresh
-// cookie is first-party end-to-end.
+${proxyNote}
 const API = '/api';
 
 async function registerUser(
@@ -138,16 +164,29 @@ test('items flow: register → login → list → create → see → refresh →
 `;
 }
 
-function e2ePlaywrightConfig(): string {
+function e2ePlaywrightConfig(isGo: boolean): string {
+  const bootNote = isGo
+    ? `\`webServer\` boots the full stack via \`task dev\` (Go api + Next web
+// in parallel) and waits for the web's URL. First run takes a while
+// (pnpm install + task migrate + api boot); CI caches pnpm so
+// subsequent runs are fast. The api needs DATABASE_URL — see
+// apps/api/.env.example and the README's Quickstart.`
+    : `\`webServer\` boots the full stack via \`task dev\` (web + api in
+// parallel) and waits for the web's URL. First run takes a while
+// (pnpm install + drizzle migrate + api boot); CI caches pnpm so
+// subsequent runs are fast. The api needs DATABASE_URL — see
+// apps/api/.env.example and the README's Quickstart.`;
+  const migrateNote = isGo
+    ? `// idempotent (already-applied migrations are skipped).`
+    : `// idempotent (drizzle-kit skips already-applied migrations).`;
+  const bootTimeNote = isGo
+    ? `// 3 min: cold pnpm install + migrate + api + web boot.`
+    : `// 3 min: cold pnpm install + drizzle migrate + api boot.`;
   return `import { defineConfig } from '@playwright/test';
 
 // playwright.config.ts — the one E2E (decision 22).
 //
-// \`webServer\` boots the full stack via \`task dev\` (web + api in
-// parallel) and waits for the web's URL. First run takes a while
-// (pnpm install + drizzle migrate + api boot); CI caches pnpm so
-// subsequent runs are fast. The api needs DATABASE_URL — see
-// apps/api/.env.example and the README's Quickstart.
+// ${bootNote}
 //
 // Single worker, sequential: there's only one test today, and the
 // items page is auth-scoped per test, so a second worker would race
@@ -168,11 +207,11 @@ export default defineConfig({
   webServer: {
     // Migrate first so the api's first request doesn't 500 on a
     // missing table; then boot the full stack. \`task migrate\` is
-    // idempotent (drizzle-kit skips already-applied migrations).
+    ${migrateNote}
     command: 'task migrate && task dev',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
-    // 3 min: cold pnpm install + drizzle migrate + api boot.
+    ${bootTimeNote}
     timeout: 180_000,
   },
   // The items flow does a register + login + query + mutation + reload
@@ -182,17 +221,26 @@ export default defineConfig({
 `;
 }
 
-function e2eTestStrategyMd(): string {
-  return `# Test strategy
+function e2eTestStrategyMd(isGo: boolean): string {
+  const unitLevel = isGo
+    ? `### Unit tests
 
-The scaffolded project follows a **three-level test pyramid** (decision 22):
-**unit** (modules), **contract** (the spine), and **exactly one E2E**
-(the items flow). This page is the rulebook; the per-level details live
-in the workspaces that own the tests.
+The modules. Each module's \`*_test.go\` exercises its own code in
+isolation. The auth shim's \`internal/auth/*_test.go\` files run
+**real** \`argon2\` + JWT signing (no mocks — decision 22: real
+libraries, not mocks). The items repo's \`internal/items/items.repo_test.go\`
+runs against a real Postgres and skips cleanly when \`DATABASE_URL\` is
+not set (so the suite is green in environments without a DB). The web
+app's \`apps/web/src/lib/server.test.ts\` proves the server-side
+api-client's auth properties (token forwarding + refresh-on-401,
+decision 16).
 
-## The three levels
-
-### Unit tests
+\`\`\`
+apps/api/internal/items/items.repo_test.go       # unit: real DB
+apps/api/internal/auth/{passwords,tokens,refresh}_test.go  # unit: real crypto
+apps/web/src/lib/server.test.ts                  # unit: the api-client's auth properties
+\`\`\``
+    : `### Unit tests
 
 The modules. Each workspace's \`src/<area>.test.ts\` exercises its own
 code in isolation. The auth shim's \`packages/auth/src/<name>.test.ts\`
@@ -206,16 +254,51 @@ not set (so the suite is green in environments without a DB).
 packages/auth/src/<name>.test.ts                  # unit: real crypto
 apps/api/src/internal/items/items.repo.test.ts    # unit: real DB
 apps/api/src/internal/auth/auth.repo.test.ts      # unit: real DB
-\`\`\`
+\`\`\``;
+  const contractLevel = isGo
+    ? `### Contract tests
 
-### Contract tests
+The spine. In polyglot shapes (this scaffold is one) the contract is
+the **committed \`openapi.yaml\`** in \`packages/contract\` (decision 19:
+Go is the canonical side — the spec is generated from the Go structs).
+Two tripwires keep it honest:
+
+- \`apps/api/contract_test.go\` — proves the committed spec equals the
+  live spec (regenerate from Go, commit — never hand-edit).
+- \`packages/contract/test/generated.test.ts\` — proves the committed TS
+  client is byte-identical to what the generator produces from the
+  committed spec (regenerate via \`task contract:generate\`, commit).`
+    : `### Contract tests
 
 The spine. In TS shapes (this scaffold is one) the **Hono RPC
 type-inference is checked at compile time** — \`@starter/api-client\`
 imports \`AppType\` from \`@starter/api\`, so a type error *is* a
 contract test (decisions 3, 9, 17/18). Add a runtime contract test
 in \`apps/api\` if a route's response shape ever drifts from the
-inferred type.
+inferred type.`;
+  const runNote = isGo
+    ? `# Just the per-workspace subsets.
+task go:test
+task test:contract
+task test:web`
+    : `# Just the per-workspace subsets.
+task test:web
+task test:api
+task test:auth
+task test:shared
+task test:db`;
+  return `# Test strategy
+
+The scaffolded project follows a **three-level test pyramid** (decision 22):
+**unit** (modules), **contract** (the spine), and **exactly one E2E**
+(the items flow). This page is the rulebook; the per-level details live
+in the workspaces that own the tests.
+
+## The three levels
+
+${unitLevel}
+
+${contractLevel}
 
 ### E2E test — exactly one
 
@@ -262,12 +345,7 @@ task test
 # Just the one E2E (requires DATABASE_URL + \`task migrate\` first).
 task test:e2e
 
-# Just the per-workspace subsets.
-task test:web
-task test:api
-task test:auth
-task test:shared
-task test:db
+${runNote}
 \`\`\`
 
 ## What each level catches

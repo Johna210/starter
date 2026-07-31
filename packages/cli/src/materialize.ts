@@ -72,7 +72,7 @@ async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition
   await writeApiClient(ctx);
   await writeAuth(ctx);
   await writeDocs(ctx, composition);
-  await writeE2e(ctx);
+  await writeE2e(ctx, composition);
 }
 
 async function writeTsMicroservicesVite(ctx: ProjectContext, composition: Composition): Promise<void> {
@@ -87,5 +87,5 @@ async function writeTsMicroservicesVite(ctx: ProjectContext, composition: Compos
   await writeApiClient(ctx, composition);
   await writeAuth(ctx);
   await writeDocs(ctx, composition);
-  await writeE2e(ctx);
+  await writeE2e(ctx, composition);
 }

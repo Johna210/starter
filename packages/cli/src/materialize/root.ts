@@ -14,20 +14,27 @@ export async function writeRoot(ctx: ProjectContext, composition: Composition): 
 
 function rootPackageJson(name: string, composition: Composition): string {
   if (composition.backend === 'go') {
-    // Shape 3 base has no web/E2E yet (ticket 12); the root is a thin
-    // Taskfile shim — the Go api owns the work.
     return JSON.stringify(
       {
         name,
         version: '0.1.0',
         private: true,
         type: 'module',
-        description: 'Scaffolded from create-fs-starter (Go-monolith + Gin + Huma).',
+        description:
+          'Scaffolded from create-fs-starter (Go-monolith + Gin + Huma + Next.js web).',
         engines: { node: '>=20.0.0' },
         scripts: {
           dev: 'task dev',
           test: 'task test',
+          'test:e2e': 'playwright test',
           build: 'task build',
+        },
+        devDependencies: {
+          // The one E2E (decision 22): lives at the project root
+          // (e2e/items-flow.spec.ts), driven by Playwright against
+          // the Next web + Go api. Per-feature E2Es are the user's
+          // job — see docs/test-strategy.md.
+          '@playwright/test': '^1.48.0',
         },
       },
       null,
@@ -70,15 +77,13 @@ function rootPnpmWorkspaceYaml(): string {
 
 function rootTaskfileYml(composition: Composition): string {
   if (composition.backend === 'go') {
-    return `# Taskfile.yml — scaffolded orchestrator (shape 3: Go-monolith base).
+    return `# Taskfile.yml — scaffolded orchestrator (shape 3: Go-monolith + Next.js web).
 #
 # Boot the stack with \`task dev\`. Per decision 19 the Go api is the
 # canonical side: the contract (packages/contract/openapi.yaml + the TS
 # client) is generated FROM the Go structs and committed — never edited
-# by hand.
-#
-# Shape 3 base has no web yet (that's ticket 12, the Next.js variant):
-# \`task dev\` boots the Go api only.
+# by hand. The web (apps/web) is a Next.js app consuming the generated
+# client through the /api rewrite (next.config.ts).
 
 version: "3"
 
@@ -90,9 +95,9 @@ tasks:
     silent: true
 
   dev:
-    desc: Boot the Go api (no web yet — ticket 12 adds Next.js)
+    desc: Boot the full stack (Go api + Next web) in parallel
     cmds:
-      - task dev:api
+      - 'task dev:web & task dev:api & wait'
 
   dev:api:
     desc: "Boot the api on http://localhost:3000 (OpenAPI: /openapi.json)"
@@ -100,10 +105,19 @@ tasks:
     cmds:
       - go run ./cmd/api
 
+  dev:web:
+    desc: Boot the Next web on http://localhost:5173 (/api is proxied to the api)
+    dir: apps/web
+    cmds:
+      - pnpm dev
+
   test:
-    desc: Run all tests (unit + contract, decision 22). The one E2E arrives with the web (ticket 12).
+    desc: Run all tests (unit + contract + the one E2E, decision 22)
     cmds:
       - task go:test
+      - task test:contract
+      - task test:web
+      - task test:e2e
 
   go:test:
     desc: Go unit + contract tests. Repo/contract tests skip cleanly when DATABASE_URL is unset.
@@ -123,6 +137,23 @@ tasks:
     cmds:
       - go vet ./...
 
+  test:contract:
+    desc: Contract client tests (committed client == committed spec, decision 19)
+    dir: packages/contract
+    cmds:
+      - pnpm test
+
+  test:web:
+    desc: Web unit tests (the api-client's auth properties, decision 16)
+    dir: apps/web
+    cmds:
+      - pnpm test
+
+  test:e2e:
+    desc: Run the one E2E (items flow). Requires DATABASE_URL + task migrate.
+    cmds:
+      - pnpm test:e2e
+
   migrate:
     desc: "Apply pending DB migrations (DATABASE_URL and JWT_SIGNING_KEY must be set in apps/api/.env — config.go validates both)"
     dir: apps/api
@@ -138,6 +169,13 @@ tasks:
     desc: Build all workspaces
     cmds:
       - task go:build
+      - task build:web
+
+  build:web:
+    desc: Production-build the web (next build)
+    dir: apps/web
+    cmds:
+      - pnpm build
 `;
   }
 
@@ -388,6 +426,7 @@ function rootGitignore(): string {
 dist/
 build/
 coverage/
+.next/
 .env
 .env.local
 *.tsbuildinfo
@@ -401,7 +440,8 @@ function rootReadme(name: string, composition: Composition): string {
 
 A fullstack monorepo scaffolded from
 [create-fs-starter](https://github.com/Johna210/starter) — **shape 3:
-Go-monolith** (Gin + Huma api, the OpenAPI contract as the seam).
+Go-monolith** (Gin + Huma api, the OpenAPI contract as the seam, and a
+Next.js web consuming the generated TS client).
 
 ## Quickstart — the items demo (decision 13)
 
@@ -419,18 +459,27 @@ valid Bearer access token is required on every request:
 # 3. Set JWT_SIGNING_KEY in apps/api/.env (at least 32 chars):
 #      openssl rand -base64 48
 
-# 4. Install the contract tooling, apply migrations, and boot the api.
+# 4. Install the contract tooling, apply migrations, and boot the stack.
 pnpm install
 task migrate
 task dev
 \`\`\`
 
-\`task dev\` boots \`apps/api\` on http://localhost:3000 (the Go api;
-the Next.js web variant is scheduled — this shape is api-only for now).
-The OpenAPI document is served live at \`/openapi.json\` and
-\`/openapi.yaml\`.
+\`task dev\` boots two processes in parallel: \`apps/api\` (the Go api on
+http://localhost:3000, OpenAPI served at \`/openapi.json\`) and
+\`apps/web\` (Next.js on http://localhost:5173). Next rewrites \`/api\` to
+the api, so the browser sees one same-origin endpoint and the httpOnly
+refresh cookie stays first-party.
 
-Try the flow with curl:
+Open http://localhost:5173, click **Sign in**, register an account, and
+you land on the items page. Create an item; it appears in the list.
+
+- \`GET /items\` returns the list (Gin route → \`requireAuth\` → \`ItemsRepo.list()\` → Postgres).
+- \`POST /items\` with \`{ "name": "..." }\` creates a row and returns it.
+
+It's a 5-minute delete when you start your real domain, not a refactor.
+
+The api is also verifiable with curl:
 
 \`\`\`sh
 # Register an account (sets the httpOnly refresh cookie, returns a token pair)
@@ -457,7 +506,15 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:3000/auth/refresh
 curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:3000/auth/logout
 \`\`\`
 
-It's a 5-minute delete when you start your real domain, not a refactor.
+To run the one E2E:
+
+\`\`\`sh
+# DATABASE_URL must be set in the shell (the scaffolded project's
+# .env is loaded by the api and the web, but the Playwright test
+# process reads process.env directly). Skips cleanly if unset.
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter
+pnpm test:e2e
+\`\`\`
 
 ## What you just saw
 
@@ -465,7 +522,20 @@ You just saw the **OpenAPI contract spine** (decisions 3, 9, 17, 19) in
 action — with **Go as the canonical side**: \`packages/contract/openapi.yaml\`
 is **generated from the Go api's structs** (Huma codegens the spec from the
 typed Gin routes) and **committed**. The TS client in \`packages/contract/src/\`
-is generated from the committed file, never hand-written.
+is generated from the committed file, never hand-written — and
+\`apps/web\` reaches the api through that client and nothing else
+(decision 15: no web variant bypasses the api — no server-action-to-DB,
+no RSC fetch-to-DB).
+
+**The web-auth flow** (decision 16, Next SSR variant): the refresh token
+lives in the api's **httpOnly cookie**; the short-lived access token is
+stored in a JS-readable cookie so the server components can forward it
+from the incoming request into the server-side api-client
+(\`apps/web/src/lib/server.ts\`). refresh-on-401 is a property of the
+client: the browser half rotates transparently against \`/api/auth/refresh\`,
+and the server half sends the browser through the \`/refresh\` bridge (a
+route handler — the one place the web may set cookies) when a
+server-side call 401s.
 
 **The modular monolith** (decision 27): \`apps/api\` holds two modules
 (\`internal/auth\`, \`internal/items\`) with typed interfaces
@@ -484,6 +554,11 @@ equals the generator's output).
 
 \`\`\`mermaid
 graph LR
+    subgraph "apps/web (Next.js :5173)"
+        W["RSC pages + client components"]
+        C["@starter/contract<br/>(generated TS client)"]
+        P["/api rewrite + /refresh bridge"]
+    end
     subgraph "apps/api (Gin + Huma, :3000)"
         R["huma.API<br/>/auth/* + /items"]
         AUTH["internal/auth<br/>argon2id + JWT + rotation<br/>(sole minter)"]
@@ -495,6 +570,9 @@ graph LR
         TS["src/ — generated TS client"]
         DART["clients/dart/ — Dart client (Flutter, ticket 17)"]
     end
+    W -->|typed call| C
+    C -->|HTTP /api| P
+    P -->|proxies| R
     R -->|mounts| AUTH
     R -->|requireAuth + mounts| ITEMS
     AUTH -->|uses| DB1
@@ -517,6 +595,10 @@ The scaffold ships honest seams — each is a documented extension point:
   \`requireAuth\` if it needs an authenticated principal.
 - **Change the contract**: edit the Go structs (the canonical side), run
   \`task contract:generate\`, and commit the spec + client diff (decision 19).
+- **Add a web page**: create a route in \`apps/web/src/app/\` (App
+  Router) and reach the api through the codegen'd client
+  (\`apps/web/src/lib/server.ts\` for server components,
+  \`apps/web/src/lib/client.ts\` for client components).
 - **Wire a fence from the auth shim** (email-verify, password reset,
   MFA, OAuth, RBAC): the auth shim's scope is fixed by decision 12 —
   fenced capabilities land in the module's route handlers.
@@ -526,15 +608,12 @@ The scaffold ships honest seams — each is a documented extension point:
 The scaffold is designed for seam-preserving upgrades — copy the pattern,
 don't refactor:
 
-- **Add the web variant** (ticket 12): the Next.js app consumes the
-  generated TS client — the contract is invariant, only the rendering
-  shell changes.
-- **Add the Flutter mobile** (ticket 17): consumes the Dart client in
-  \`packages/contract/clients/dart/\`.
 - **Split a capability out** (decisions 10, 27): extract
   \`internal/auth\` into a sibling service, exactly as the TS shapes'
   example split — the modular monolith's \`internal/*\` structure is
   already prepared for it.
+- **Add the Flutter mobile** (ticket 17): consumes the Dart client in
+  \`packages/contract/clients/dart/\`.
 - **Record your decisions** (decision 30): use \`docs/adr/\` to record
   architectural decisions.
 
@@ -542,25 +621,33 @@ don't refactor:
 
 | Task | What it does |
 |------|--------------|
-| \`task dev\` | Boot the Go api (no web yet — that's ticket 12) |
-| \`task test\` | Run all tests: Go unit + contract (decision 22). The one E2E arrives with the web |
+| \`task dev\` | Boot the Go api + the Next web in parallel |
+| \`task dev:web\` | Boot just the Next web (:5173) |
+| \`task test\` | Run all tests: Go unit + contract + web unit + the one E2E (decision 22) |
 | \`task go:test\` | Go unit + contract tests (repo/contract tests skip cleanly when \`DATABASE_URL\` is unset) |
 | \`task go:build\` | Compile the api |
+| \`task test:web\` | Web unit tests (the api-client's decision-16 auth properties) |
+| \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task migrate\` | Apply pending DB migrations (the Go migration runner) |
 | \`task contract:generate\` | Regenerate \`openapi.yaml\` from the Go structs + regenerate the TS client (commit the diff) |
-| \`task build\` | Build all workspaces |
+| \`task build\` | Build all workspaces (api + web) |
 
-## Tests — unit + contract (decision 22)
+## Tests — unit + contract + the one E2E (decision 22)
 
-The scaffold ships two test levels (the E2E arrives with the web in
-ticket 12):
+The scaffold ships three test levels:
 
 - **Unit** — \`apps/api/internal/{auth,items}\`: the repo layers against a
   real Postgres, the auth shim against real argon2 + jwt. Skipped
-  cleanly when \`DATABASE_URL\` is unset.
+  cleanly when \`DATABASE_URL\` is unset. \`apps/web\`: the server-side
+  api-client's auth properties (token forwarding + refresh-on-401).
 - **Contract** — \`apps/api/contract_test.go\` validates the committed
   \`packages/contract/openapi.yaml\` against the running server
-  (spec equality + schema-checked route flows).
+  (spec equality + schema-checked route flows); the contract package's
+  own test proves the committed TS client equals the generator's output.
+- **E2E** — exactly one (\`e2e/items-flow.spec.ts\`, decision 22): a real
+  browser drives register → login → list → create → reload on the Next
+  web against the real Go api and Postgres. Per-feature E2Es are your
+  job — see [\`docs/test-strategy.md\`](docs/test-strategy.md).
 `;
   }
 
