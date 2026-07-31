@@ -7,6 +7,10 @@
 // building + testing a materialized project (go vet + go test incl.
 // contract tests against a real Postgres).
 //
+// go.sum is committed so a fresh materialization builds without a
+// network round-trip; it was captured with `go mod tidy` and changes
+// only when the dependency set in go.mod changes (re-bake then).
+//
 // Per issue #27 the materializer is split by workspace; this module
 // owns every file written into apps/api. The orchestrator
 // (materialize.ts) calls writeGoApi(ctx); template functions are
@@ -1709,7 +1713,7 @@ func New(deps Deps) (*gin.Engine, huma.API) {
 	r.Use(gin.Recovery())
 
 	cfg := deps.Config
-	api := humagin.New(r, humaDefaultConfig(cfg))
+	api := humagin.New(r, humaDefaultConfig())
 
 	// The signer is the sole minter (decision 11): only this module
 	// signs; everyone else verifies.
@@ -1733,7 +1737,7 @@ func New(deps Deps) (*gin.Engine, huma.API) {
 	return r, api
 }
 
-func humaDefaultConfig(cfg config.Config) huma.Config {
+func humaDefaultConfig() huma.Config {
 	c := huma.DefaultConfig("Starter API", "0.1.0")
 	c.OpenAPI.Info.Description = "The scaffolded Go api: auth shim + items demo (decision 12/13)."
 	return c

@@ -970,11 +970,11 @@ dependencies:
 }
 
 function dartClient(): string {
-  return `// GENERATED for the Flutter mobile (ticket 17) from
-// ../openapi.yaml (decision 19: Go is canonical, clients are
-// downstream). Keep in sync with the committed spec; regenerate with
-// the openapi-generator (dart-dio flavor) once the Flutter workspace
-// lands — see ../README.md.
+  return `// Dart client over the committed openapi.yaml (decision 19: Go is
+// canonical, clients are downstream). Hand-shaped now for the Flutter
+// mobile (ticket 17); the openapi-generator (dart-dio flavor)
+// regeneration pipeline lands with that ticket — see ../README.md.
+// Keep in sync with the committed spec.
 
 library;
 

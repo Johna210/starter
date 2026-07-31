@@ -124,7 +124,7 @@ tasks:
       - go vet ./...
 
   migrate:
-    desc: Apply pending DB migrations (DATABASE_URL must be set in apps/api/.env)
+    desc: "Apply pending DB migrations (DATABASE_URL and JWT_SIGNING_KEY must be set in apps/api/.env — config.go validates both)"
     dir: apps/api
     cmds:
       - go run ./cmd/migrate
@@ -504,8 +504,6 @@ graph LR
     DART -. "generated from" .-> YAML
 \`\`\`
 
-For the full architecture, see [\`docs/architecture/\`](docs/architecture/).
-
 ## Where to extend
 
 The scaffold ships honest seams — each is a documented extension point:
@@ -520,9 +518,8 @@ The scaffold ships honest seams — each is a documented extension point:
 - **Change the contract**: edit the Go structs (the canonical side), run
   \`task contract:generate\`, and commit the spec + client diff (decision 19).
 - **Wire a fence from the auth shim** (email-verify, password reset,
-  MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
-
-Each seam is one line + a link into [\`docs/standards/best-practices.md\`](docs/standards/best-practices.md).
+  MFA, OAuth, RBAC): the auth shim's scope is fixed by decision 12 —
+  fenced capabilities land in the module's route handlers.
 
 ## How to grow
 
@@ -539,8 +536,7 @@ don't refactor:
   example split — the modular monolith's \`internal/*\` structure is
   already prepared for it.
 - **Record your decisions** (decision 30): use \`docs/adr/\` to record
-  architectural decisions. Each ADR is a short document — see the
-  convention in [\`docs/adr/README.md\`](docs/adr/README.md).
+  architectural decisions.
 
 ## Tasks
 
