@@ -1,18 +1,18 @@
 #!/usr/bin/env tsx
 // ci/materialize-test-project.ts — materialize a scaffolded project for CI.
 //
-// Called by the GitHub Actions workflow (issues 11, 12) to produce a
+// Called by the GitHub Actions workflow (issues 11, 12, 13) to produce a
 // fresh scaffolded project that can be installed, migrated, and tested
 // (unit + contract + the one E2E over items, decision 22).
 //
 // Usage: npx tsx ci/materialize-test-project.ts [target-dir] [shape]
 //
-// shape: 'ts-monolith' (default) | 'ts-microservices'
+// shape: 'ts-monolith' (default) | 'ts-microservices' | 'go-monolith'
 // target-dir defaults to /tmp/test-project.
 
 import { resolve } from 'node:path';
 import { rm } from 'node:fs/promises';
-import { type Composition, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../packages/cli/src/composition.js';
+import { type Composition, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../packages/cli/src/composition.js';
 import { materialize } from '../packages/cli/src/materialize.js';
 
 function compositionForShape(shape: string): Composition {
@@ -23,6 +23,8 @@ function compositionForShape(shape: string): Composition {
       return TS_MONOLITH_VITE;
     case 'ts-microservices':
       return TS_MICROSERVICES_VITE;
+    case 'go-monolith':
+      return GO_MONOLITH_NEXT;
     default:
       throw new Error(`Unknown shape: ${shape}`);
   }
