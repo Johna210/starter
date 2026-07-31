@@ -42,7 +42,7 @@ export async function writeNextWeb(ctx: ProjectContext, composition: Composition
   await writeFileRecursive(join(targetDir, 'apps/web/next-env.d.ts'), webNextEnvDts());
   await writeFileRecursive(join(targetDir, 'apps/web/next.config.ts'), webNextConfigTs(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/.env.example'), webNextEnvExample(isMicroservices));
-  await writeFileRecursive(join(targetDir, 'apps/web/src/config.ts'), webNextConfigModule());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/config.ts'), webNextConfigModule(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/token-cookie.ts'), webNextTokenCookie());
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/client.ts'), webNextClient());
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/server.ts'), webNextServer());
@@ -195,7 +195,10 @@ ${authNote}
 `;
 }
 
-function webNextConfigModule(): string {
+function webNextConfigModule(isMicroservices: boolean): string {
+  const apiAuthDefault = isMicroservices
+    ? 'http://localhost:3001'
+    : 'http://localhost:3000';
   return `// @starter/web — typed config (decision 28).
 //
 // Server-side base URLs for the main api and the auth endpoints.
@@ -203,6 +206,8 @@ function webNextConfigModule(): string {
 // same-origin /api path (proxied to these hosts by next.config.ts
 // rewrites in dev, by the deploy platform in production). This
 // module is server-only — keep it out of client component imports.
+// (The dev proxy in next.config.ts reads the same two env vars for
+// its rewrites; those two files are the only env readers.)
 // Copy apps/web/.env.example to apps/web/.env.local for local dev.
 
 import { z } from 'zod';
@@ -215,7 +220,7 @@ const configSchema = z.object({
   apiAuthUrl: z
     .string()
     .min(1, 'API_AUTH_URL is required')
-    .default('http://localhost:3000'),
+    .default('${apiAuthDefault}'),
 });
 
 const parsed = configSchema.safeParse({
@@ -325,7 +330,10 @@ const authedFetch: typeof fetch = async (input, init) => {
 
   // 2. On 401, try a transparent refresh + retry — but only for
   //    non-auth endpoints (the refresh endpoint must not recurse).
-  if (response.status === 401 && !skipAuth && token) {
+  //    Not gated on having a token: the access cookie dies in lockstep
+  //    with the token, so an idle-but-signed-in user has a live
+  //    refresh cookie but no access token.
+  if (response.status === 401 && !skipAuth) {
     try {
       const pair = await client.auth.refresh({});
       setAccessTokenCookie(pair.access);
@@ -749,11 +757,7 @@ export async function GET(request: NextRequest) {
   if (!refreshToken) {
     // No session at all — the user is signed out, and the referer page
     // is auth-protected (sending them back would loop /refresh forever).
-    // Clear any stale access token and land on /login.
-    const signedOut = redirectToLogin(request);
-    signedOut.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    signedOut.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    return signedOut;
+    return signedOutResponse(request);
   }
 
   const auth = createClient({ baseUrl: config.apiAuthUrl });
@@ -762,10 +766,7 @@ export async function GET(request: NextRequest) {
     pair = await auth.auth.refresh({ refresh: refreshToken });
   } catch {
     // Refresh token invalid / expired / revoked — the session is gone.
-    const signedOut = redirectToLogin(request);
-    signedOut.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    signedOut.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    return signedOut;
+    return signedOutResponse(request);
   }
 
   out.cookies.set(ACCESS_TOKEN_COOKIE, pair.access, {
@@ -782,8 +783,14 @@ export async function GET(request: NextRequest) {
   return out;
 }
 
-function redirectToLogin(request: NextRequest): NextResponse {
-  return NextResponse.redirect(new URL('/login', request.url));
+// The signed-out branch of the bridge: /login, with any stale cookies
+// cleared (the api's refresh cookie clears itself via Max-Age=0 on the
+// logout path; here we mirror it for the no-session case).
+function signedOutResponse(request: NextRequest): NextResponse {
+  const out = NextResponse.redirect(new URL('/login', request.url));
+  out.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
+  out.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
+  return out;
 }
 `;
 }
