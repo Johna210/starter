@@ -23,11 +23,18 @@ function rootPackageJson(name: string, composition: Composition): string {
         description:
           'Scaffolded from create-fs-starter (Go-monolith + Gin + Huma + Next.js web).',
         engines: { node: '>=20.0.0' },
+        packageManager: 'pnpm@10.17.1',
         scripts: {
           dev: 'task dev',
           test: 'task test',
           'test:e2e': 'playwright test',
           build: 'task build',
+        },
+        // pnpm 10 blocks dependency postinstall scripts by default;
+        // sharp (a Next.js image-optimization dep) needs its build
+        // script approved or `pnpm install` exits non-zero.
+        pnpm: {
+          onlyBuiltDependencies: ['sharp'],
         },
         devDependencies: {
           // The one E2E (decision 22): lives at the project root
