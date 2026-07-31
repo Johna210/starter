@@ -712,7 +712,10 @@ function webNextRefreshRoute(): string {
 // via redirect(), which only issues GETs.
 //
 // Returns the user where they were going: the Referer header (the
-// page that triggered the redirect), or /items.
+// page that triggered the redirect), or /items. When there is no
+// session to refresh, it lands on /login instead — the referer page
+// is auth-protected, so sending the user back would loop /refresh
+// forever.
 
 import { NextRequest, NextResponse } from 'next/server';
 import type { AuthTokens } from '@starter/contract';
@@ -744,10 +747,13 @@ export async function GET(request: NextRequest) {
 
   const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
   if (!refreshToken) {
-    // No session at all — clear any stale access token, sign out.
-    out.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    out.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    return out;
+    // No session at all — the user is signed out, and the referer page
+    // is auth-protected (sending them back would loop /refresh forever).
+    // Clear any stale access token and land on /login.
+    const signedOut = redirectToLogin(request);
+    signedOut.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
+    signedOut.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
+    return signedOut;
   }
 
   const auth = createClient({ baseUrl: config.apiAuthUrl });
@@ -756,9 +762,10 @@ export async function GET(request: NextRequest) {
     pair = await auth.auth.refresh({ refresh: refreshToken });
   } catch {
     // Refresh token invalid / expired / revoked — the session is gone.
-    out.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    out.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
-    return out;
+    const signedOut = redirectToLogin(request);
+    signedOut.cookies.set(ACCESS_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
+    signedOut.cookies.set(REFRESH_TOKEN_COOKIE, '', { path: '/', maxAge: 0 });
+    return signedOut;
   }
 
   out.cookies.set(ACCESS_TOKEN_COOKIE, pair.access, {
@@ -773,6 +780,10 @@ export async function GET(request: NextRequest) {
     maxAge: REFRESH_TOKEN_TTL_SECONDS,
   });
   return out;
+}
+
+function redirectToLogin(request: NextRequest): NextResponse {
+  return NextResponse.redirect(new URL('/login', request.url));
 }
 `;
 }
