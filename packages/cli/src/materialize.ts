@@ -10,7 +10,7 @@
 // (`materialize`, `UnimplementedCompositionError`, `ProjectContext`)
 // is re-exported here unchanged so external imports keep working.
 
-import { type Composition, describeComposition, isImplemented, isTsMicroservicesVite } from './composition.js';
+import { type Composition, describeComposition, isGoMonolithNext, isImplemented, isTsMicroservicesVite } from './composition.js';
 // Re-exported to preserve the public API: external code imports
 // `ProjectContext` from '../src/materialize.js'.
 export type { ProjectContext } from './materialize/_shared.js';
@@ -26,6 +26,8 @@ import { writeApiAuth } from './materialize/api-auth.js';
 import { writeApiAuthService } from './materialize/api-auth-service.js';
 import { writeDocs } from './materialize/docs.js';
 import { writeE2e } from './materialize/e2e.js';
+import { writeGoApi } from './materialize/go-api.js';
+import { writeGoContract } from './materialize/go-contract.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
@@ -43,11 +45,19 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   if (!isImplemented(composition)) {
     throw new UnimplementedCompositionError(composition);
   }
-  if (isTsMicroservicesVite(composition)) {
+  if (isGoMonolithNext(composition)) {
+    await writeGoMonolithBase(ctx, composition);
+  } else if (isTsMicroservicesVite(composition)) {
     await writeTsMicroservicesVite(ctx, composition);
   } else {
     await writeTsMonolithVite(ctx, composition);
   }
+}
+
+async function writeGoMonolithBase(ctx: ProjectContext, composition: Composition): Promise<void> {
+  await writeRoot(ctx, composition);
+  await writeGoApi(ctx);
+  await writeGoContract(ctx);
 }
 
 async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition): Promise<void> {

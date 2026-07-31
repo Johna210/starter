@@ -5,14 +5,35 @@ import { type ProjectContext, writeFileRecursive } from './_shared.js';
 export async function writeRoot(ctx: ProjectContext, composition: Composition): Promise<void> {
   const { targetDir, name } = ctx;
 
-  await writeFileRecursive(join(targetDir, 'package.json'), rootPackageJson(name));
+  await writeFileRecursive(join(targetDir, 'package.json'), rootPackageJson(name, composition));
   await writeFileRecursive(join(targetDir, 'pnpm-workspace.yaml'), rootPnpmWorkspaceYaml());
   await writeFileRecursive(join(targetDir, 'Taskfile.yml'), rootTaskfileYml(composition));
   await writeFileRecursive(join(targetDir, '.gitignore'), rootGitignore());
   await writeFileRecursive(join(targetDir, 'README.md'), rootReadme(name, composition));
 }
 
-function rootPackageJson(name: string): string {
+function rootPackageJson(name: string, composition: Composition): string {
+  if (composition.backend === 'go') {
+    // Shape 3 base has no web/E2E yet (ticket 12); the root is a thin
+    // Taskfile shim — the Go api owns the work.
+    return JSON.stringify(
+      {
+        name,
+        version: '0.1.0',
+        private: true,
+        type: 'module',
+        description: 'Scaffolded from create-fs-starter (Go-monolith + Gin + Huma).',
+        engines: { node: '>=20.0.0' },
+        scripts: {
+          dev: 'task dev',
+          test: 'task test',
+          build: 'task build',
+        },
+      },
+      null,
+      2,
+    ) + '\n';
+  }
   return JSON.stringify(
     {
       name,
@@ -48,6 +69,78 @@ function rootPnpmWorkspaceYaml(): string {
 }
 
 function rootTaskfileYml(composition: Composition): string {
+  if (composition.backend === 'go') {
+    return `# Taskfile.yml — scaffolded orchestrator (shape 3: Go-monolith base).
+#
+# Boot the stack with \`task dev\`. Per decision 19 the Go api is the
+# canonical side: the contract (packages/contract/openapi.yaml + the TS
+# client) is generated FROM the Go structs and committed — never edited
+# by hand.
+#
+# Shape 3 base has no web yet (that's ticket 12, the Next.js variant):
+# \`task dev\` boots the Go api only.
+
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  dev:
+    desc: Boot the Go api (no web yet — ticket 12 adds Next.js)
+    cmds:
+      - task dev:api
+
+  dev:api:
+    desc: "Boot the api on http://localhost:3000 (OpenAPI: /openapi.json)"
+    dir: apps/api
+    cmds:
+      - go run ./cmd/api
+
+  test:
+    desc: Run all tests (unit + contract, decision 22). The one E2E arrives with the web (ticket 12).
+    cmds:
+      - task go:test
+
+  go:test:
+    desc: Go unit + contract tests. Repo/contract tests skip cleanly when DATABASE_URL is unset.
+    dir: apps/api
+    cmds:
+      - go test ./...
+
+  go:build:
+    desc: Compile the api
+    dir: apps/api
+    cmds:
+      - go build ./...
+
+  go:vet:
+    desc: Vet the api
+    dir: apps/api
+    cmds:
+      - go vet ./...
+
+  migrate:
+    desc: Apply pending DB migrations (DATABASE_URL must be set in apps/api/.env)
+    dir: apps/api
+    cmds:
+      - go run ./cmd/migrate
+
+  contract:generate:
+    desc: Regenerate the contract from Go (decision 19) — openapi.yaml from the structs, then the TS client. Commit the diff.
+    cmds:
+      - 'cd apps/api && go run ./cmd/specgen && cd ../.. && pnpm --filter @starter/contract generate'
+
+  build:
+    desc: Build all workspaces
+    cmds:
+      - task go:build
+`;
+  }
+
   const isMicroservices = composition.topology === 'microservices';
 
   if (isMicroservices) {
@@ -303,6 +396,178 @@ coverage/
 }
 
 function rootReadme(name: string, composition: Composition): string {
+  if (composition.backend === 'go') {
+    return `# ${name}
+
+A fullstack monorepo scaffolded from
+[create-fs-starter](https://github.com/Johna210/starter) — **shape 3:
+Go-monolith** (Gin + Huma api, the OpenAPI contract as the seam).
+
+## Quickstart — the items demo (decision 13)
+
+The scaffold ships a single trivial domain, \`items\`, to prove the whole
+stack composes end-to-end on day one. \`/items\` is **protected** — a
+valid Bearer access token is required on every request:
+
+\`\`\`sh
+# 1. Install Taskfile (go-task) if you don't have it:
+#   go install github.com/go-task/task/v3/cmd/task@latest
+#   or see https://taskfile.dev/installation/
+
+# 2. Bring up Postgres any way you like (docker, native, etc.) and set
+#    DATABASE_URL in apps/api/.env (copy apps/api/.env.example).
+# 3. Set JWT_SIGNING_KEY in apps/api/.env (at least 32 chars):
+#      openssl rand -base64 48
+
+# 4. Install the contract tooling, apply migrations, and boot the api.
+pnpm install
+task migrate
+task dev
+\`\`\`
+
+\`task dev\` boots \`apps/api\` on http://localhost:3000 (the Go api;
+the Next.js web variant is scheduled — this shape is api-only for now).
+The OpenAPI document is served live at \`/openapi.json\` and
+\`/openapi.yaml\`.
+
+Try the flow with curl:
+
+\`\`\`sh
+# Register an account (sets the httpOnly refresh cookie, returns a token pair)
+curl -i -c cookies.txt -X POST http://localhost:3000/auth/register \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"you@example.com","password":"password123"}'
+
+# Login (refresh token also lands in the cookie jar)
+curl -i -c cookies.txt -X POST http://localhost:3000/auth/login \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"you@example.com","password":"password123"}'
+
+# Create an item with the access token
+curl -X POST http://localhost:3000/items -H 'Content-Type: application/json' \\
+  -H 'Authorization: Bearer <access>' -d '{"name":"first item"}'
+
+# List items
+curl http://localhost:3000/items -H 'Authorization: Bearer <access>'
+
+# Rotate the refresh token (cookie-first; a body fallback also works)
+curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:3000/auth/refresh
+
+# Log out (revokes the refresh token, clears the cookie)
+curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:3000/auth/logout
+\`\`\`
+
+It's a 5-minute delete when you start your real domain, not a refactor.
+
+## What you just saw
+
+You just saw the **OpenAPI contract spine** (decisions 3, 9, 17, 19) in
+action — with **Go as the canonical side**: \`packages/contract/openapi.yaml\`
+is **generated from the Go api's structs** (Huma codegens the spec from the
+typed Gin routes) and **committed**. The TS client in \`packages/contract/src/\`
+is generated from the committed file, never hand-written.
+
+**The modular monolith** (decision 27): \`apps/api\` holds two modules
+(\`internal/auth\`, \`internal/items\`) with typed interfaces
+(\`items.repo.go\`, \`auth.repo.go\`) mounted at \`/auth\` and \`/items\` —
+the same split-seam a microservices shape would extract. The **auth
+shim** (decision 12) is the four endpoints (\`/register\`, \`/login\`,
+\`/refresh\`, \`/logout\`) over argon2id + JWT + refresh-token rotation;
+\`/items\` sits behind its \`requireAuth\` Bearer gate. \`apps/api\` is the
+**sole minter** (decision 11): one process holds the signing key.
+
+**Your contract spine**: change a Go struct, run \`task contract:generate\`,
+commit — the spec and the TS client follow (the scaffold's tests enforce
+this: \`apps/api/contract_test.go\` proves the committed spec equals the live
+spec, and the contract package's own test proves the committed client
+equals the generator's output).
+
+\`\`\`mermaid
+graph LR
+    subgraph "apps/api (Gin + Huma, :3000)"
+        R["huma.API<br/>/auth/* + /items"]
+        AUTH["internal/auth<br/>argon2id + JWT + rotation<br/>(sole minter)"]
+        ITEMS["internal/items<br/>typed ItemsRepo"]
+        DB1["Postgres (pgx)"]
+    end
+    subgraph "packages/contract (the only package)"
+        YAML["openapi.yaml<br/>generated from Go structs, committed"]
+        TS["src/ — generated TS client"]
+        DART["clients/dart/ — Dart client (Flutter, ticket 17)"]
+    end
+    R -->|mounts| AUTH
+    R -->|requireAuth + mounts| ITEMS
+    AUTH -->|uses| DB1
+    ITEMS -->|uses| DB1
+    YAML -. "task contract:generate" .-> R
+    TS -. "generated from" .-> YAML
+    DART -. "generated from" .-> YAML
+\`\`\`
+
+For the full architecture, see [\`docs/architecture/\`](docs/architecture/).
+
+## Where to extend
+
+The scaffold ships honest seams — each is a documented extension point:
+
+- **Add a db table**: append a \`migrations/000N_*.sql\` file, then
+  \`task migrate\`.
+- **Add an api domain**: \`apps/api/internal/<name>/\` with
+  \`<name>.repo.go\` (interface) + \`<name>.repo.pg.go\` (pgx) +
+  \`<name>.routes.go\` (Huma structs) + \`index.go\` (mountable module);
+  mount it in \`apps/api/internal/router/router.go\`. Behind
+  \`requireAuth\` if it needs an authenticated principal.
+- **Change the contract**: edit the Go structs (the canonical side), run
+  \`task contract:generate\`, and commit the spec + client diff (decision 19).
+- **Wire a fence from the auth shim** (email-verify, password reset,
+  MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
+
+Each seam is one line + a link into [\`docs/standards/best-practices.md\`](docs/standards/best-practices.md).
+
+## How to grow
+
+The scaffold is designed for seam-preserving upgrades — copy the pattern,
+don't refactor:
+
+- **Add the web variant** (ticket 12): the Next.js app consumes the
+  generated TS client — the contract is invariant, only the rendering
+  shell changes.
+- **Add the Flutter mobile** (ticket 17): consumes the Dart client in
+  \`packages/contract/clients/dart/\`.
+- **Split a capability out** (decisions 10, 27): extract
+  \`internal/auth\` into a sibling service, exactly as the TS shapes'
+  example split — the modular monolith's \`internal/*\` structure is
+  already prepared for it.
+- **Record your decisions** (decision 30): use \`docs/adr/\` to record
+  architectural decisions. Each ADR is a short document — see the
+  convention in [\`docs/adr/README.md\`](docs/adr/README.md).
+
+## Tasks
+
+| Task | What it does |
+|------|--------------|
+| \`task dev\` | Boot the Go api (no web yet — that's ticket 12) |
+| \`task test\` | Run all tests: Go unit + contract (decision 22). The one E2E arrives with the web |
+| \`task go:test\` | Go unit + contract tests (repo/contract tests skip cleanly when \`DATABASE_URL\` is unset) |
+| \`task go:build\` | Compile the api |
+| \`task migrate\` | Apply pending DB migrations (the Go migration runner) |
+| \`task contract:generate\` | Regenerate \`openapi.yaml\` from the Go structs + regenerate the TS client (commit the diff) |
+| \`task build\` | Build all workspaces |
+
+## Tests — unit + contract (decision 22)
+
+The scaffold ships two test levels (the E2E arrives with the web in
+ticket 12):
+
+- **Unit** — \`apps/api/internal/{auth,items}\`: the repo layers against a
+  real Postgres, the auth shim against real argon2 + jwt. Skipped
+  cleanly when \`DATABASE_URL\` is unset.
+- **Contract** — \`apps/api/contract_test.go\` validates the committed
+  \`packages/contract/openapi.yaml\` against the running server
+  (spec equality + schema-checked route flows).
+`;
+  }
+
   const isTs = composition.backend === 'ts';
   const isMicroservices = composition.topology === 'microservices';
   const contractLabel = isTs ? 'Hono RPC' : 'OpenAPI';

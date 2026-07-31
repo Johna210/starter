@@ -44,9 +44,24 @@ export const TS_MICROSERVICES_VITE: Composition = {
   ai: 'off',
 };
 
+/**
+ * Shape 3: Go-monolith + Next (issue #13, base).
+ *
+ * The blessed Go-monolith web variant is Next.js (decision 24b) — the
+ * web itself lands in ticket 12; this ticket materializes the api +
+ * contract mechanism only.
+ */
+export const GO_MONOLITH_NEXT: Composition = {
+  backend: 'go',
+  topology: 'monolith',
+  web: 'next',
+  mobile: 'none',
+  ai: 'off',
+};
+
 /** Returns true iff the CLI can actually materialize this composition. */
 export function isImplemented(c: Composition): boolean {
-  return isTsMonolithVite(c) || isTsMicroservicesVite(c);
+  return isTsMonolithVite(c) || isTsMicroservicesVite(c) || isGoMonolithNext(c);
 }
 
 export function isTsMonolithVite(c: Composition): boolean {
@@ -66,6 +81,16 @@ export function isTsMicroservicesVite(c: Composition): boolean {
     c.web === TS_MICROSERVICES_VITE.web &&
     c.mobile === TS_MICROSERVICES_VITE.mobile &&
     c.ai === TS_MICROSERVICES_VITE.ai
+  );
+}
+
+export function isGoMonolithNext(c: Composition): boolean {
+  return (
+    c.backend === GO_MONOLITH_NEXT.backend &&
+    c.topology === GO_MONOLITH_NEXT.topology &&
+    c.web === GO_MONOLITH_NEXT.web &&
+    c.mobile === GO_MONOLITH_NEXT.mobile &&
+    c.ai === GO_MONOLITH_NEXT.ai
   );
 }
 

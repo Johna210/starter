@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type Composition,
   describeComposition,
+  GO_MONOLITH_NEXT,
   isImplemented,
   TS_MONOLITH_VITE,
 } from '../src/composition.js';
@@ -17,7 +18,11 @@ describe('composition', () => {
       expect(isImplemented(c)).toBe(true);
     });
 
-    it('returns false for Go + monolith (shape 3 — not yet implemented)', () => {
+    it('returns true for Go + monolith + Next (shape 3 — implemented in issue #13)', () => {
+      expect(isImplemented(GO_MONOLITH_NEXT)).toBe(true);
+    });
+
+    it('returns false for Go + monolith with the TS web variant (only the blessed web default is wired)', () => {
       const c: Composition = { ...TS_MONOLITH_VITE, backend: 'go' };
       expect(isImplemented(c)).toBe(false);
     });
