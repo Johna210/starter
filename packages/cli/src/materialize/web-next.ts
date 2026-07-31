@@ -427,7 +427,12 @@ function webNextServerTest(): string {
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockCookies = new Map<string, string>();
+const { mockCookies, mockRedirect } = vi.hoisted(() => ({
+  mockCookies: new Map<string, string>(),
+  mockRedirect: vi.fn(() => {
+    throw new Error('NEXT_REDIRECT');
+  }),
+}));
 
 vi.mock('next/headers', () => ({
   cookies: async () => ({
@@ -435,10 +440,6 @@ vi.mock('next/headers', () => ({
       mockCookies.has(name) ? { name, value: mockCookies.get(name)! } : undefined,
   }),
 }));
-
-const mockRedirect = vi.fn(() => {
-  throw new Error('NEXT_REDIRECT');
-});
 
 vi.mock('next/navigation', () => ({
   redirect: mockRedirect,
@@ -459,7 +460,10 @@ describe('server-side api-client (Next SSR variant, decision 16)', () => {
 
   it('forwards the access token from the incoming cookie as a Bearer header', async () => {
     mockCookies.set('access_token', 'test-access-token');
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), { status: 200 }));
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify([]), { status: 200 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const { api } = await createServerClients();
@@ -476,7 +480,7 @@ describe('server-side api-client (Next SSR variant, decision 16)', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(
-        async () =>
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
           new Response(JSON.stringify({ detail: 'unauthorized' }), { status: 401 }),
       ),
     );
