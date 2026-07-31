@@ -237,7 +237,7 @@ function goEnvExample(): string {
   return `# apps/api — env surface (decision 28). Copy to .env for dev; prod
 # injects real env vars. Code reads these only through internal/config.
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/starter
-JWT_SIGNING_KEY=change-me-openssl-rand-base64-48
+JWT_SIGNING_KEY=replace-me-with-a-32-plus-char-random-secret
 PORT=3000
 ACCESS_TOKEN_TTL=900
 REFRESH_TOKEN_TTL=604800
