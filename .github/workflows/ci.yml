@@ -2,10 +2,13 @@
 #
 # Per issue 11 the matrix started with one row (TS-monolith).
 # Per issue 12 shape 2 (TS-microservices) was added.
-# Per issue 13 shape 3 (go-monolith base) was added — api + contract
-# only (no web until ticket 12), so the Go row runs the Go unit +
-# contract tests and the TS contract-client checks, with no Playwright
-# E2E yet.
+# Per issue 13 shape 3 (go-monolith) was added — api + contract only.
+# Per issue 14 (ticket 12) the Go shapes gained the Next.js web
+# variant, so the Go rows now run the web unit tests, the web
+# typecheck, and the one Playwright E2E exactly like the TS rows.
+# Shape 4 (go-microservices, issue 15) is one more `backend: go` row —
+# every Go-step below applies to it unchanged (ticket 12 covers shape 4
+# by reuse).
 # Adding a new blessed combination (issue 18) is a single config
 # change: add a row to the matrix and a matching step in the
 # "scaffolded project" job.
@@ -13,7 +16,7 @@
 # Per decision 22 the test pyramid is unit + contract + one E2E
 # over items. The starter repo's own tests (contract.sh + vitest)
 # run first; then the CI materialises a fresh scaffolded project
-# and runs its full suite including the Playwright E2E (TS shapes).
+# and runs its full suite including the Playwright E2E.
 
 name: CI
 
@@ -37,9 +40,12 @@ jobs:
       matrix:
         include:
           - shape: ts-monolith
+            backend: ts
           - shape: ts-microservices
+            backend: ts
           - shape: go-monolith
-          # Extensible: add `go-microservices` rows here per issue 18.
+            backend: go
+          # Extensible: add `go-microservices` (backend: go) here per issue 15/18.
 
     services:
       postgres:
@@ -73,7 +79,7 @@ jobs:
           cache: pnpm
 
       - name: Setup Go (Go shapes)
-        if: matrix.shape == 'go-monolith'
+        if: matrix.backend == 'go'
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.x
@@ -109,7 +115,7 @@ jobs:
 
       # ── TS shapes: per-workspace unit tests ─────────────────────
       - name: Scaffolded project — unit tests (TS shapes)
-        if: startsWith(matrix.shape, 'ts-')
+        if: matrix.backend == 'ts'
         run: |
           # Continue past workspaces with no test files (vitest exits 1).
           # Only fail if a workspace has tests that actually fail.
@@ -128,24 +134,24 @@ jobs:
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
-      # ── Go shapes: unit + contract tests (decision 22) ──────────
+      # ── Go shapes: unit + contract + web tests (decision 22) ────
       # The Go unit tests (repo layers over Postgres, auth shim over
-      # real argon2/jwt) and the contract tests (committed
-      # openapi.yaml vs the running server, schema-checking each
-      # route, decision 19/22) run via task go:test; the TS contract
-      # client's own tests prove the committed client is up to date
-      # with the committed spec.
-      - name: Scaffolded project — Go unit + contract tests
-        if: matrix.shape == 'go-monolith'
+      # real argon2/jwt), the contract tests (committed openapi.yaml
+      # vs the running server, decision 19/22), the contract client's
+      # own test (committed client == generator output), and the web's
+      # unit test (the api-client's decision-16 auth properties).
+      - name: Scaffolded project — Go unit + contract + web tests
+        if: matrix.backend == 'go'
         run: |
           task go:test
           pnpm --filter @starter/contract test
+          pnpm --filter @starter/web test
         working-directory: /tmp/test-project
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
       - name: Scaffolded project — typecheck (compile-time contract)
-        if: startsWith(matrix.shape, 'ts-')
+        if: matrix.backend == 'ts'
         run: |
           for ws in packages/db packages/api-client apps/api apps/api-auth apps/web; do
             if [ -d "$ws" ]; then
@@ -156,24 +162,23 @@ jobs:
           done
         working-directory: /tmp/test-project
 
-      # ── Go shapes: build + typecheck the contract client ────────
-      - name: Scaffolded project — Go build + contract client typecheck
-        if: matrix.shape == 'go-monolith'
+      # ── Go shapes: build + typecheck the contract client + web ──
+      - name: Scaffolded project — Go build + typecheck (contract + web)
+        if: matrix.backend == 'go'
         run: |
           task go:build
           pnpm --filter @starter/contract typecheck
+          pnpm --filter @starter/web typecheck
         working-directory: /tmp/test-project
 
       # ── E2E (Playwright over the items flow, decision 22) ──────
-      # TS shapes only: the Go shapes' E2E arrives with the web
-      # (ticket 12).
+      # Every blessed combo ships the one E2E: the web (Vite or Next)
+      # composes with the api and Postgres through a real browser.
       - name: Install Playwright browsers
-        if: startsWith(matrix.shape, 'ts-')
         run: pnpm exec playwright install --with-deps chromium
         working-directory: /tmp/test-project
 
       - name: E2E — items flow
-        if: startsWith(matrix.shape, 'ts-')
         run: pnpm test:e2e
         working-directory: /tmp/test-project
         env:
