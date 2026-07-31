@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
+import { GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
 import { materialize } from '../src/materialize.js';
 
 const exec = promisify(execFile);
@@ -80,6 +80,31 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
         });
         expect(stdout + stderr, `tsc failed in ${ws}`).not.toMatch(/error TS/);
       }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'the materialized Go-monolith project typechecks its contract client (issue #13)',
+    async () => {
+      // 1. Materialize
+      await materialize({ targetDir, name: 'e2e-app' }, GO_MONOLITH_NEXT);
+
+      // 2. Install
+      await exec('pnpm', ['install', '--prefer-offline'], { cwd: targetDir });
+
+      // 3. Typecheck the TS contract client (@starter/contract)
+      const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
+        cwd: join(targetDir, 'packages/contract'),
+      });
+      expect(stdout + stderr, 'tsc failed in packages/contract').not.toMatch(/error TS/);
+
+      // 4. The contract client's own test proves the committed client
+      // matches the committed spec (the Go-as-canonical tripwire).
+      const { stdout: testOut, stderr: testErr } = await exec('pnpm', ['test'], {
+        cwd: join(targetDir, 'packages/contract'),
+      });
+      expect(testOut + testErr, 'contract client tests failed').not.toMatch(/failed|error/);
     },
     TIMEOUT,
   );
