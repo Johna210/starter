@@ -651,11 +651,14 @@ function generateClient(paths, schemas) {
   lines.push(\`  getAccessToken?: () => string | null;\`);
   lines.push(\`  /** Called when a request answers 401, e.g. to trigger a refresh. */\`);
   lines.push(\`  onUnauthorized?: () => void;\`);
+  lines.push(\`  /** Fetch implementation override (defaults to global fetch). */\`);
+  lines.push(\`  fetch?: typeof fetch;\`);
   lines.push(\`}\`, '');
 
   lines.push(\`/** A typed fetch wrapper over the committed openapi.yaml (decision 19). */\`);
   lines.push(\`export function createClient(options: ClientOptions) {\`);
   lines.push(\`  const { baseUrl } = options;\`);
+  lines.push(\`  const doFetch = options.fetch ?? fetch;\`);
   lines.push(\`  async function request<T>(method: string, path: string, body?: unknown, authenticated = false): Promise<T> {\`);
   lines.push(\`    const headers: Record<string, string> = {};\`);
   lines.push(\`    if (body !== undefined) headers['Content-Type'] = 'application/json';\`);
@@ -663,7 +666,7 @@ function generateClient(paths, schemas) {
   lines.push(\`      const token = options.getAccessToken?.() ?? null;\`);
   lines.push(\`      if (token) headers['Authorization'] = \\\`Bearer \\\${token}\\\`;\`);
   lines.push(\`    }\`);
-  lines.push(\`    const res = await fetch(\\\`\\\${baseUrl}\\\${path}\\\`, {\`);
+  lines.push(\`    const res = await doFetch(\\\`\\\${baseUrl}\\\${path}\\\`, {\`);
   lines.push(\`      method,\`);
   lines.push(\`      headers,\`);
   lines.push(\`      body: body !== undefined ? JSON.stringify(body) : undefined,\`);
@@ -828,11 +831,14 @@ export interface ClientOptions {
   getAccessToken?: () => string | null;
   /** Called when a request answers 401, e.g. to trigger a refresh. */
   onUnauthorized?: () => void;
+  /** Fetch implementation override (defaults to global fetch). */
+  fetch?: typeof fetch;
 }
 
 /** A typed fetch wrapper over the committed openapi.yaml (decision 19). */
 export function createClient(options: ClientOptions) {
   const { baseUrl } = options;
+  const doFetch = options.fetch ?? fetch;
   async function request<T>(method: string, path: string, body?: unknown, authenticated = false): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -840,7 +846,7 @@ export function createClient(options: ClientOptions) {
       const token = options.getAccessToken?.() ?? null;
       if (token) headers['Authorization'] = \`Bearer \${token}\`;
     }
-    const res = await fetch(\`\${baseUrl}\${path}\`, {
+    const res = await doFetch(\`\${baseUrl}\${path}\`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
