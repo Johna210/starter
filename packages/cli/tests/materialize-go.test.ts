@@ -1,9 +1,9 @@
-// Materializer tests for shape 3 (Go-monolith, issue #13).
+// Materializer tests for shape 3 (Go-monolith, issue #13 + web ticket 12).
 //
-// The Go-monolith base composition: Go backend + monolith topology +
-// Next.js web variant (blessed default per decision 24b — web itself
-// lands in ticket 12) + no mobile + no AI. This ticket materializes the
-// api + contract mechanism only:
+// The Go-monolith composition: Go backend + monolith topology + Next.js
+// web variant (blessed default per decision 24b) + no mobile + no AI.
+// Issue #13 materialized the api + contract mechanism; ticket 12 added
+// the Next.js web variant (apps/web) and the one E2E:
 //
 //   - apps/api         — Go module: Gin + Huma, internal/{auth,items}
 //     modules (modular monolith, decision 27), env-based config.go
@@ -11,8 +11,12 @@
 //   - packages/contract — the ONLY package (decision 9): committed
 //     openapi.yaml generated from the Go structs (decision 19,
 //     Go-as-canonical-side), a generated TS client, a Dart client.
-//   - No apps/web (ticket 12), no packages/{db,auth,shared,api-client}
-//     (decision 9: each backend owns its own).
+//   - apps/web         — Next.js (App Router, RSC) consuming the
+//     generated TS client (decision 15/19), decision-16 web-auth flow
+//     for the SSR variant (access token forwarded from the incoming
+//     cookie into the server-side api-client; refresh bridge).
+//   - No packages/{db,auth,shared,api-client} (decision 9: each
+//     backend owns its own).
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
@@ -66,15 +70,16 @@ describe('Go-monolith + Next + no-mobile + no-AI (shape 3 base, issue #13)', () 
     }
   });
 
-  it('root package.json is a thin Taskfile shim (no playwright — the E2E arrives with the web)', async () => {
+  it('root package.json is a thin Taskfile shim with the one E2E (decision 22)', async () => {
     await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
     const pkg = JSON.parse(await readFile(join(targetDir, 'package.json'), 'utf8'));
     expect(pkg.scripts.dev).toBe('task dev');
     expect(pkg.scripts.test).toBe('task test');
-    expect(pkg.devDependencies).toBeUndefined();
+    expect(pkg.scripts['test:e2e']).toMatch(/playwright/);
+    expect(pkg.devDependencies?.['@playwright/test']).toEqual(expect.any(String));
   });
 
-  it('root Taskfile declares Go targets (go:test, go:build) and dev boots the Go api only (no web until ticket 12)', async () => {
+  it('root Taskfile declares Go targets and boots web + api via `task dev` (ticket 12)', async () => {
     await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
     const tf = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
     expect(tf).toMatch(/^  go:test:/m);
@@ -82,8 +87,14 @@ describe('Go-monolith + Next + no-mobile + no-AI (shape 3 base, issue #13)', () 
     const devBlock = tf.match(/^  dev:\n(?:    .+\n)+/m);
     expect(devBlock, 'dev: task should exist').toBeTruthy();
     expect(devBlock![0]).toMatch(/dev:api/);
-    expect(devBlock![0]).not.toMatch(/dev:web/);
+    expect(devBlock![0]).toMatch(/dev:web/);
     expect(tf).toMatch(/go run \.\/cmd\/api/);
+    // The test meta-task covers go + contract + web + the one E2E.
+    const testBlock = tf.match(/^  test:\n(?:    .+\n)+/m);
+    expect(testBlock![0]).toMatch(/go:test/);
+    expect(testBlock![0]).toMatch(/test:contract/);
+    expect(testBlock![0]).toMatch(/test:web/);
+    expect(testBlock![0]).toMatch(/test:e2e/);
   });
 
   it('root Taskfile migrate runs the Go migration runner and contract:generate regenerates the spec from Go (decision 19)', async () => {
@@ -214,9 +225,8 @@ describe('Go-monolith + Next + no-mobile + no-AI (shape 3 base, issue #13)', () 
     expect(items).toMatch(/items/i);
   });
 
-  it('no web workspace yet (ticket 12) and no shared TS packages (decision 9: the contract is the only package)', async () => {
+  it('no shared TS packages (decision 9: the contract is the only package)', async () => {
     await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
-    await expectMissing(join(targetDir, 'apps/web'));
     for (const ws of ['packages/db', 'packages/auth', 'packages/shared', 'packages/api-client']) {
       await expectMissing(join(targetDir, ws));
     }
@@ -293,6 +303,100 @@ describe('Go-monolith + Next + no-mobile + no-AI (shape 3 base, issue #13)', () 
     expect(ct).toMatch(/openapi\.yaml/);
     expect(ct).toMatch(/httptest/);
     expect(ct).toMatch(/NewRecorder/);
+  });
+
+  it('writes apps/web as a Next.js (App Router) workspace consuming @starter/contract (ticket 12)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const webDir = join(targetDir, 'apps/web');
+    for (const file of [
+      'package.json',
+      'tsconfig.json',
+      'next-env.d.ts',
+      'next.config.ts',
+      '.env.example',
+      'src/config.ts',
+      'src/lib/token-cookie.ts',
+      'src/lib/client.ts',
+      'src/lib/server.ts',
+      'src/lib/server.test.ts',
+      'src/app/layout.tsx',
+      'src/app/page.tsx',
+      'src/app/globals.css',
+      'src/app/login/page.tsx',
+      'src/app/items/page.tsx',
+      'src/app/refresh/route.ts',
+      'src/components/sign-out-button.tsx',
+      'src/components/create-item-form.tsx',
+    ]) {
+      expect((await stat(join(webDir, file))).isFile(), `${file} should exist`).toBe(true);
+    }
+    const pkg = JSON.parse(await readFile(join(webDir, 'package.json'), 'utf8'));
+    expect(pkg.dependencies.next).toEqual(expect.any(String));
+    expect(pkg.dependencies['@starter/contract']).toBe('workspace:*');
+    expect(pkg.dependencies.zod).toEqual(expect.any(String));
+    expect(pkg.scripts.dev).toMatch(/next dev/);
+    expect(pkg.scripts.typecheck).toBe('tsc --noEmit');
+  });
+
+  it('web next.config.ts rewrites /api to the Go api (same-origin cookies; the Vite proxy mirror)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const cfg = await readFile(join(targetDir, 'apps/web/next.config.ts'), 'utf8');
+    expect(cfg).toMatch(/rewrites/);
+    expect(cfg).toMatch(/\/api\/:path\*/);
+    expect(cfg).toMatch(/localhost:3000/);
+  });
+
+  it('web config.ts is the zod-validated env surface (decision 28): API_URL + API_AUTH_URL, fail-fast', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const cfg = await readFile(join(targetDir, 'apps/web/src/config.ts'), 'utf8');
+    expect(cfg).toMatch(/from 'zod'/);
+    expect(cfg).toMatch(/apiUrl/);
+    expect(cfg).toMatch(/apiAuthUrl/);
+    expect(cfg).toMatch(/process\.env/);
+    expect(cfg).toMatch(/throw new Error/);
+  });
+
+  it('web items page is a server component fetching through the server-side api-client (ticket 12)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const page = await readFile(join(targetDir, 'apps/web/src/app/items/page.tsx'), 'utf8');
+    expect(page).toMatch(/createServerClients/);
+    expect(page).toMatch(/api\.items\.list/);
+    expect(page).toMatch(/CreateItemForm/);
+    expect(page).toMatch(/<li/);
+  });
+
+  it("web login page signs in through the codegen'd client and stores the access token cookie (decision 16)", async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const login = await readFile(join(targetDir, 'apps/web/src/app/login/page.tsx'), 'utf8');
+    expect(login).toMatch(/'use client'/);
+    expect(login).toMatch(/client\.auth\.login/);
+    expect(login).toMatch(/setAccessTokenCookie/);
+  });
+
+  it('the server-side api-client forwards the access token from the incoming cookie and routes 401s through /refresh (decision 16)', async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const server = await readFile(join(targetDir, 'apps/web/src/lib/server.ts'), 'utf8');
+    expect(server).toMatch(/createServerClients/);
+    expect(server).toMatch(/next\/headers/);
+    expect(server).toMatch(/getAccessToken/);
+    expect(server).toMatch(/ACCESS_TOKEN_COOKIE/);
+    expect(server).toMatch(/redirect\('\/refresh'\)/);
+    const route = await readFile(join(targetDir, 'apps/web/src/app/refresh/route.ts'), 'utf8');
+    expect(route).toMatch(/auth\.refresh/);
+    expect(route).toMatch(/httpOnly/);
+  });
+
+  it("the browser api-client uses the codegen'd client with refresh-on-401 (no hand-written endpoint URLs)", async () => {
+    await materialize({ targetDir, name: 'test-app' }, GO_MONOLITH_NEXT);
+    const clientSrc = await readFile(join(targetDir, 'apps/web/src/lib/client.ts'), 'utf8');
+    expect(clientSrc).toMatch(/from '@starter\/contract'/);
+    expect(clientSrc).toMatch(/createClient/);
+    expect(clientSrc).toMatch(/credentials: 'include'/);
+    expect(clientSrc).toMatch(/client\.auth\.refresh/);
+    // The web app's own unit test proves the two decision-16 properties.
+    const test = await readFile(join(targetDir, 'apps/web/src/lib/server.test.ts'), 'utf8');
+    expect(test).toMatch(/Bearer/);
+    expect(test).toMatch(/refresh/);
   });
 
   it('ships the Go test files: items repo unit tests, auth shim unit tests (decision 22)', async () => {

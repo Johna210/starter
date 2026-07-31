@@ -28,6 +28,7 @@ import { writeDocs } from './materialize/docs.js';
 import { writeE2e } from './materialize/e2e.js';
 import { writeGoApi } from './materialize/go-api.js';
 import { writeGoContract } from './materialize/go-contract.js';
+import { writeNextWeb } from './materialize/web-next.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
@@ -58,6 +59,8 @@ async function writeGoMonolithBase(ctx: ProjectContext, composition: Composition
   await writeRoot(ctx, composition);
   await writeGoApi(ctx);
   await writeGoContract(ctx);
+  await writeNextWeb(ctx, composition);
+  await writeE2e(ctx, composition);
 }
 
 async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition): Promise<void> {
@@ -72,7 +75,7 @@ async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition
   await writeApiClient(ctx);
   await writeAuth(ctx);
   await writeDocs(ctx, composition);
-  await writeE2e(ctx);
+  await writeE2e(ctx, composition);
 }
 
 async function writeTsMicroservicesVite(ctx: ProjectContext, composition: Composition): Promise<void> {
@@ -87,5 +90,5 @@ async function writeTsMicroservicesVite(ctx: ProjectContext, composition: Compos
   await writeApiClient(ctx, composition);
   await writeAuth(ctx);
   await writeDocs(ctx, composition);
-  await writeE2e(ctx);
+  await writeE2e(ctx, composition);
 }

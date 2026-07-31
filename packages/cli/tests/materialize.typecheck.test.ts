@@ -85,7 +85,7 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
   );
 
   it(
-    'the materialized Go-monolith project typechecks its contract client (issue #13)',
+    'the materialized Go-monolith project typechecks its contract client and web (issue #13 + ticket 12)',
     async () => {
       // 1. Materialize
       await materialize({ targetDir, name: 'e2e-app' }, GO_MONOLITH_NEXT);
@@ -105,6 +105,20 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
         cwd: join(targetDir, 'packages/contract'),
       });
       expect(testOut + testErr, 'contract client tests failed').not.toMatch(/failed|error/);
+
+      // 5. The Next web app typechecks end-to-end (RSC pages + the
+      // server-side api-client against the codegen'd client).
+      const { stdout: webOut, stderr: webErr } = await exec('pnpm', ['typecheck'], {
+        cwd: join(targetDir, 'apps/web'),
+      });
+      expect(webOut + webErr, 'tsc failed in apps/web').not.toMatch(/error TS/);
+
+      // 6. The web's unit test proves the server-side client's
+      // decision-16 auth properties (forwarding + refresh-on-401).
+      const { stdout: webTestOut, stderr: webTestErr } = await exec('pnpm', ['test'], {
+        cwd: join(targetDir, 'apps/web'),
+      });
+      expect(webTestOut + webTestErr, 'web unit tests failed').not.toMatch(/failed|error/);
     },
     TIMEOUT,
   );

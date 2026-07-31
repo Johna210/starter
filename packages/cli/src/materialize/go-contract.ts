@@ -641,7 +641,7 @@ function generateClient(paths, schemas) {
     for (const t of [...usedTypes].sort()) {
       lines.push(\`  \${t},\`);
     }
-    lines.push(\`} from './types.js';\`, '');
+    lines.push(\`} from './types';\`, '');
   }
 
   lines.push(\`export interface ClientOptions {\`);
@@ -651,11 +651,14 @@ function generateClient(paths, schemas) {
   lines.push(\`  getAccessToken?: () => string | null;\`);
   lines.push(\`  /** Called when a request answers 401, e.g. to trigger a refresh. */\`);
   lines.push(\`  onUnauthorized?: () => void;\`);
+  lines.push(\`  /** Fetch implementation override (defaults to global fetch). */\`);
+  lines.push(\`  fetch?: typeof fetch;\`);
   lines.push(\`}\`, '');
 
   lines.push(\`/** A typed fetch wrapper over the committed openapi.yaml (decision 19). */\`);
   lines.push(\`export function createClient(options: ClientOptions) {\`);
   lines.push(\`  const { baseUrl } = options;\`);
+  lines.push(\`  const doFetch = options.fetch ?? fetch;\`);
   lines.push(\`  async function request<T>(method: string, path: string, body?: unknown, authenticated = false): Promise<T> {\`);
   lines.push(\`    const headers: Record<string, string> = {};\`);
   lines.push(\`    if (body !== undefined) headers['Content-Type'] = 'application/json';\`);
@@ -663,7 +666,7 @@ function generateClient(paths, schemas) {
   lines.push(\`      const token = options.getAccessToken?.() ?? null;\`);
   lines.push(\`      if (token) headers['Authorization'] = \\\`Bearer \\\${token}\\\`;\`);
   lines.push(\`    }\`);
-  lines.push(\`    const res = await fetch(\\\`\\\${baseUrl}\\\${path}\\\`, {\`);
+  lines.push(\`    const res = await doFetch(\\\`\\\${baseUrl}\\\${path}\\\`, {\`);
   lines.push(\`      method,\`);
   lines.push(\`      headers,\`);
   lines.push(\`      body: body !== undefined ? JSON.stringify(body) : undefined,\`);
@@ -702,8 +705,12 @@ function generateClient(paths, schemas) {
       const lower = method.toLowerCase();
       const args = reqT !== 'void' ? \`input: \${reqT}\` : '';
       const callBody = reqT !== 'void' ? ', input' : '';
+      // The authenticated flag is the 4th positional arg; an
+      // authenticated no-body call needs an explicit undefined body
+      // placeholder (request(method, path, body?, authenticated?)).
+      const authArg = auth ? (reqT !== 'void' ? ', true' : ', undefined, true') : '';
       lines.push(\`    /** \${lower.toUpperCase()} \${path}\${auth ? ' (requires Bearer access token)' : ''} */\`);
-      lines.push(\`    \${name}: async (\${args}) => request<\${resT}>('\${lower}', '\${path}'\${callBody}, \${auth}),\`);
+      lines.push(\`    \${name}: async (\${args}) => request<\${resT}>('\${lower}', '\${path}'\${callBody}\${authArg}),\`);
     }
     lines.push(\`  },\`);
   }
@@ -718,8 +725,8 @@ function generateIndex(types) {
   for (const t of types) {
     lines.push(\`  \${t},\`);
   }
-  lines.push(\`} from './types.js';\`);
-  lines.push(\`export { createClient, type ClientOptions } from './client.js';\`);
+  lines.push(\`} from './types';\`);
+  lines.push(\`export { createClient, type ClientOptions } from './client';\`);
   return lines.join('\\n');
 }
 
@@ -819,7 +826,7 @@ import type {
   AuthTokens,
   Item,
   ItemCreateInputBody,
-} from './types.js';
+} from './types';
 
 export interface ClientOptions {
   /** Base URL of the api, e.g. http://localhost:3000 */
@@ -828,11 +835,14 @@ export interface ClientOptions {
   getAccessToken?: () => string | null;
   /** Called when a request answers 401, e.g. to trigger a refresh. */
   onUnauthorized?: () => void;
+  /** Fetch implementation override (defaults to global fetch). */
+  fetch?: typeof fetch;
 }
 
 /** A typed fetch wrapper over the committed openapi.yaml (decision 19). */
 export function createClient(options: ClientOptions) {
   const { baseUrl } = options;
+  const doFetch = options.fetch ?? fetch;
   async function request<T>(method: string, path: string, body?: unknown, authenticated = false): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -840,7 +850,7 @@ export function createClient(options: ClientOptions) {
       const token = options.getAccessToken?.() ?? null;
       if (token) headers['Authorization'] = \`Bearer \${token}\`;
     }
-    const res = await fetch(\`\${baseUrl}\${path}\`, {
+    const res = await doFetch(\`\${baseUrl}\${path}\`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -865,17 +875,17 @@ export function createClient(options: ClientOptions) {
 
   auth: {
     /** POST /auth/login */
-    login: async (input: AuthCredentialsInputBody) => request<AuthTokens>('post', '/auth/login', input, false),
+    login: async (input: AuthCredentialsInputBody) => request<AuthTokens>('post', '/auth/login', input),
     /** POST /auth/logout */
-    logout: async (input: AuthRefreshInputBody) => request<void>('post', '/auth/logout', input, false),
+    logout: async (input: AuthRefreshInputBody) => request<void>('post', '/auth/logout', input),
     /** POST /auth/refresh */
-    refresh: async (input: AuthRefreshInputBody) => request<AuthTokens>('post', '/auth/refresh', input, false),
+    refresh: async (input: AuthRefreshInputBody) => request<AuthTokens>('post', '/auth/refresh', input),
     /** POST /auth/register */
-    register: async (input: AuthRegisterInputBody) => request<AuthRegisterOutputBody>('post', '/auth/register', input, false),
+    register: async (input: AuthRegisterInputBody) => request<AuthRegisterOutputBody>('post', '/auth/register', input),
   },
   items: {
     /** GET /items (requires Bearer access token) */
-    list: async () => request<Item[]>('get', '/items', true),
+    list: async () => request<Item[]>('get', '/items', undefined, true),
     /** POST /items (requires Bearer access token) */
     create: async (input: ItemCreateInputBody) => request<Item>('post', '/items', input, true),
   },
@@ -900,8 +910,8 @@ export type {
   ErrorModel,
   Item,
   ItemCreateInputBody,
-} from './types.js';
-export { createClient, type ClientOptions } from './client.js';`;
+} from './types';
+export { createClient, type ClientOptions } from './client';`;
 }
 
 function generatedTestTs(): string {
