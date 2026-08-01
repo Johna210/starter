@@ -4,12 +4,15 @@ Scaffold a new fullstack project from the [Starter](../../). The CLI
 composes five prompt axes (backend language, topology, web variant,
 mobile, AI) and writes a runnable monorepo.
 
-> **Status (issue #3, `0.1.0`):** only one composition is
-> materializable:
+> **Status (`0.1.0`):** four compositions are materializable:
 >
-> - **TS-monolith + Vite+TanStack + no mobile + no AI**
+> - **TS-monolith + Vite+TanStack + no mobile + no AI** (shape 1)
+> - **TS-microservices + Vite+TanStack + no mobile + no AI** (shape 2)
+> - **Go-monolith + Next.js + no mobile + no AI** (shape 3)
+> - **Go-microservices + Next.js + no mobile + no AI** (shape 4: example
+>   split — apps/api-auth as the sole minter, JWKS-verified apps/api)
 >
-> All 23+ other combinations produce a friendly error. See [Issue
+> All other combinations produce a friendly error. See [Issue
 > tracker](https://github.com/Johna210/starter/issues) for the roadmap.
 
 ## Usage

@@ -628,6 +628,11 @@ function generateClient(paths, schemas) {
   for (const [path, item] of Object.entries(paths)) {
     for (const [method, op] of Object.entries(item)) {
       if (method !== 'get' && method !== 'post') continue;
+      // Well-known endpoints (e.g. /.well-known/jwks.json) are
+      // machine-to-machine infrastructure consumed by services, not
+      // by generated clients — skip them (shape 4's auth service
+      // documents its JWKS in the spec; no client calls it).
+      if (path.startsWith('/.')) continue;
       const reqT = requestType(op, schemas);
       const resT = responseType(op, schemas);
       if (reqT !== 'void') usedTypes.add(reqT.replace(/\\[\\]$/g, ''));

@@ -59,9 +59,27 @@ export const GO_MONOLITH_NEXT: Composition = {
   ai: 'off',
 };
 
+/**
+ * Shape 4: Go-microservices + Next (issue #15).
+ *
+ * The example split (decision 10) on the capability axis (auth/IAM):
+ * apps/api-auth is a separate Go deployable — the sole minter of JWTs
+ * (decision 11) owning the four auth endpoints + the JWKS endpoint —
+ * and apps/api verifies tokens locally against the fetched-and-cached
+ * JWKS (decision 11's local-verify principle). No packages/auth across
+ * languages: the contract is the only seam (decision 9).
+ */
+export const GO_MICROSERVICES_NEXT: Composition = {
+  backend: 'go',
+  topology: 'microservices',
+  web: 'next',
+  mobile: 'none',
+  ai: 'off',
+};
+
 /** Returns true iff the CLI can actually materialize this composition. */
 export function isImplemented(c: Composition): boolean {
-  return isTsMonolithVite(c) || isTsMicroservicesVite(c) || isGoMonolithNext(c);
+  return isTsMonolithVite(c) || isTsMicroservicesVite(c) || isGoMonolithNext(c) || isGoMicroservicesNext(c);
 }
 
 export function isTsMonolithVite(c: Composition): boolean {
@@ -91,6 +109,16 @@ export function isGoMonolithNext(c: Composition): boolean {
     c.web === GO_MONOLITH_NEXT.web &&
     c.mobile === GO_MONOLITH_NEXT.mobile &&
     c.ai === GO_MONOLITH_NEXT.ai
+  );
+}
+
+export function isGoMicroservicesNext(c: Composition): boolean {
+  return (
+    c.backend === GO_MICROSERVICES_NEXT.backend &&
+    c.topology === GO_MICROSERVICES_NEXT.topology &&
+    c.web === GO_MICROSERVICES_NEXT.web &&
+    c.mobile === GO_MICROSERVICES_NEXT.mobile &&
+    c.ai === GO_MICROSERVICES_NEXT.ai
   );
 }
 

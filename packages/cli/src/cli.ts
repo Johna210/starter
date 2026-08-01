@@ -128,8 +128,9 @@ Prompts (in order):
 For this ticket the implemented compositions are:
   - ts-monolith + vite + no-mobile + no-AI (shape 1)
   - ts-microservices + vite + no-mobile + no-AI (shape 2)
-  - go-monolith + next + no-mobile + no-AI (shape 3 base: api + contract
-    only; the web variant is scheduled)
+  - go-monolith + next + no-mobile + no-AI (shape 3)
+  - go-microservices + next + no-mobile + no-AI (shape 4: example
+    split + JWKS verify)
 All other combinations produce a friendly error.
 `;
 }

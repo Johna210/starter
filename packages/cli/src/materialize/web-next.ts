@@ -43,7 +43,7 @@ export async function writeNextWeb(ctx: ProjectContext, composition: Composition
   await writeFileRecursive(join(targetDir, 'apps/web/next.config.ts'), webNextConfigTs(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/.env.example'), webNextEnvExample(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/config.ts'), webNextConfigModule(isMicroservices));
-  await writeFileRecursive(join(targetDir, 'apps/web/src/lib/token-cookie.ts'), webNextTokenCookie());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/lib/token-cookie.ts'), webNextTokenCookie(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/client.ts'), webNextClient());
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/server.ts'), webNextServer());
   await writeFileRecursive(join(targetDir, 'apps/web/src/lib/server.test.ts'), webNextServerTest());
@@ -52,7 +52,7 @@ export async function writeNextWeb(ctx: ProjectContext, composition: Composition
   await writeFileRecursive(join(targetDir, 'apps/web/src/app/globals.css'), webNextGlobalsCss());
   await writeFileRecursive(join(targetDir, 'apps/web/src/app/login/page.tsx'), webNextLoginPage());
   await writeFileRecursive(join(targetDir, 'apps/web/src/app/items/page.tsx'), webNextItemsPage());
-  await writeFileRecursive(join(targetDir, 'apps/web/src/app/refresh/route.ts'), webNextRefreshRoute());
+  await writeFileRecursive(join(targetDir, 'apps/web/src/app/refresh/route.ts'), webNextRefreshRoute(isMicroservices));
   await writeFileRecursive(join(targetDir, 'apps/web/src/components/sign-out-button.tsx'), webNextSignOutButton());
   await writeFileRecursive(join(targetDir, 'apps/web/src/components/create-item-form.tsx'), webNextCreateItemForm());
 }
@@ -144,7 +144,10 @@ const API_AUTH_URL = process.env.API_AUTH_URL ?? 'http://localhost:3001';
 
 const nextConfig: NextConfig = {
   rewrites: async () => [
-    { source: '/api/auth/:path*', destination: \`\${API_AUTH_URL}/:path*\` },
+    // The auth service owns /auth/*; the rewrite keeps the /auth
+    // prefix (mirrors the Vite variant's proxy, which strips only
+    // /api): /api/auth/register -> :3001/auth/register.
+    { source: '/api/auth/:path*', destination: \`\${API_AUTH_URL}/auth/:path*\` },
     { source: '/api/:path*', destination: \`\${API_URL}/:path*\` },
   ],
 };
@@ -243,7 +246,10 @@ export type Config = z.infer<typeof configSchema>;
 `;
 }
 
-function webNextTokenCookie(): string {
+function webNextTokenCookie(isMicroservices: boolean): string {
+  const cookieOwner = isMicroservices
+    ? 'apps/api-auth/internal/auth/auth.routes.go'
+    : 'apps/api/internal/auth/auth.routes.go';
   return `// Access-token cookie helpers (decision 16, Next SSR variant).
 //
 // The access token lives in a JS-readable cookie so that (a) the
@@ -257,7 +263,7 @@ function webNextTokenCookie(): string {
 export const ACCESS_TOKEN_COOKIE = 'access_token';
 
 // Keep in sync with the api's refresh cookie name (the single source
-// of truth is apps/api/internal/auth/auth.routes.go). The SPA variant
+// of truth is ${cookieOwner}). The SPA variant
 // duplicates it the same way (apps/web/src/lib/api.ts).
 export const REFRESH_TOKEN_COOKIE = 'refresh_token';
 
@@ -705,7 +711,8 @@ export default async function ItemsPage() {
 `;
 }
 
-function webNextRefreshRoute(): string {
+function webNextRefreshRoute(isMicroservices: boolean): string {
+  const ttlOwner = isMicroservices ? 'apps/api-auth' : 'apps/api';
   return `// The refresh bridge (decision 16 in the Next SSR variant).
 //
 // When a server-side api call 401s, the server-side api-client sends
@@ -735,7 +742,7 @@ import {
   REFRESH_TOKEN_COOKIE,
 } from '../../lib/token-cookie';
 
-// Keep in sync with REFRESH_TOKEN_TTL in apps/api (default 604800s).
+// Keep in sync with REFRESH_TOKEN_TTL in ${ttlOwner} (default 604800s).
 const REFRESH_TOKEN_TTL_SECONDS = 604800;
 
 function backToPath(request: NextRequest): string {

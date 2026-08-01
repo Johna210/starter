@@ -1365,8 +1365,10 @@ func (s *PGRefreshTokenStore) Revoke(ctx context.Context, jti string) error {
 
 function authRoutesGo(): string {
   return `// auth.routes.go — the four auth endpoints (decision 12):
-// register, login, refresh, logout. In shape 3 the auth shim is
-// embedded in the monolith (internal/auth), mounted at /auth.
+// register, login, refresh, logout. The auth shim's HTTP surface —
+// mounted at /auth inside apps/api in the monolith shapes, or living
+// in apps/api-auth (the sole minter's service) in the microservices
+// shapes.
 //
 // Cookie contract (decision 16): the refresh token travels in an
 // httpOnly cookie (set on register/login, rotated on refresh, cleared
@@ -1578,8 +1580,8 @@ func clearRefreshCookie() string {
 
 function authMiddlewareGo(): string {
   return `// auth.middleware.go — requireAuth: the Bearer access-token gate for
-// protected modules. The api owns the signing key (sole minter,
-// decision 11); the middleware only verifies.
+// protected modules. The middleware only verifies — the signing key
+// lives with the sole minter (decision 11), wherever that process is.
 package auth
 
 import (
@@ -1627,7 +1629,9 @@ type claimsKey struct{}
 function authIndexGo(): string {
   return `// index.go composes the auth module: the /auth prefix and the four
 // endpoints (decision 12). The module owns its stores and the signer
-// (sole minter, decision 11: apps/api holds the signing key).
+// (sole minter, decision 11: only the process hosting this module
+// signs — apps/api in the monolith shapes, apps/api-auth in the
+// microservices shapes).
 package auth
 
 import (

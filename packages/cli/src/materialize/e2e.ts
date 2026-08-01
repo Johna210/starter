@@ -24,13 +24,14 @@ import { type ProjectContext, writeFileRecursive } from './_shared.js';
 export async function writeE2e(ctx: ProjectContext, composition: Composition): Promise<void> {
   const { targetDir } = ctx;
   const isGo = composition.backend === 'go';
+  const isMicroservices = composition.topology === 'microservices';
 
-  await writeFileRecursive(join(targetDir, 'e2e/items-flow.spec.ts'), e2eItemsFlowSpec(isGo));
-  await writeFileRecursive(join(targetDir, 'playwright.config.ts'), e2ePlaywrightConfig(isGo));
-  await writeFileRecursive(join(targetDir, 'docs/test-strategy.md'), e2eTestStrategyMd(isGo));
+  await writeFileRecursive(join(targetDir, 'e2e/items-flow.spec.ts'), e2eItemsFlowSpec(isGo, isMicroservices));
+  await writeFileRecursive(join(targetDir, 'playwright.config.ts'), e2ePlaywrightConfig(isGo, isMicroservices));
+  await writeFileRecursive(join(targetDir, 'docs/test-strategy.md'), e2eTestStrategyMd(isGo, isMicroservices));
 }
 
-function e2eItemsFlowSpec(isGo: boolean): string {
+function e2eItemsFlowSpec(isGo: boolean, isMicroservices: boolean): string {
   const authFlowNote = isGo
     ? `Log in via the UI (the Next SSR variant's access-token-in-cookie +
 //      refresh-in-httpOnly-cookie flow, decision 16).`
@@ -47,7 +48,15 @@ function e2eItemsFlowSpec(isGo: boolean): string {
     : `Assert the new item appears in the list (TanStack Query
 //      invalidation refreshed it).`;
   const proxyNote = isGo
-    ? `// \`baseURL\` is set in playwright.config.ts to the web's URL. The web
+    ? isMicroservices
+      ? `// \`baseURL\` is set in playwright.config.ts to the web's URL. The web
+// rewrites \`/api/auth/*\` to api-auth at http://localhost:3001 and
+// \`/api/*\` to api at http://localhost:3000 (see
+// apps/web/next.config.ts), so the E2E uses the same origin for the
+// UI and the api calls — same-origin means the httpOnly refresh
+// cookie is first-party end-to-end, and the auth flow runs through
+// the sole-minter service (decision 11).`
+      : `// \`baseURL\` is set in playwright.config.ts to the web's URL. The web
 // rewrites \`/api/...\` to the api at http://localhost:3000 (see
 // apps/web/next.config.ts), so the E2E uses the same origin for both
 // the UI and the api calls — same-origin means the httpOnly refresh
@@ -58,7 +67,10 @@ function e2eItemsFlowSpec(isGo: boolean): string {
 // the UI and the api calls — same-origin means the httpOnly refresh
 // cookie is first-party end-to-end.`;
   const envNote = isGo
-    ? `provides a Postgres service; local devs set DATABASE_URL in
+    ? isMicroservices
+      ? `provides a Postgres service; local devs set DATABASE_URL in
+// apps/api/.env + apps/api-auth/.env per the README's Quickstart.`
+      : `provides a Postgres service; local devs set DATABASE_URL in
 // apps/api/.env per the README's Quickstart.`
     : `provides a Postgres service; local devs set DATABASE_URL in
 // apps/api/.env + packages/db/.env per the README's Quickstart.`;
@@ -164,9 +176,16 @@ test('items flow: register → login → list → create → see → refresh →
 `;
 }
 
-function e2ePlaywrightConfig(isGo: boolean): string {
+function e2ePlaywrightConfig(isGo: boolean, isMicroservices: boolean): string {
   const bootNote = isGo
-    ? `\`webServer\` boots the full stack via \`task dev\` (Go api + Next web
+    ? isMicroservices
+      ? `\`webServer\` boots the full stack via \`task dev\` (Go api-auth +
+// Go api + Next web in parallel) and waits for the web's URL. First
+// run takes a while (pnpm install + task migrate + services boot); CI
+// caches pnpm so subsequent runs are fast. The services need
+// DATABASE_URL — see apps/api/.env.example + apps/api-auth/.env.example
+// and the README's Quickstart.`
+      : `\`webServer\` boots the full stack via \`task dev\` (Go api + Next web
 // in parallel) and waits for the web's URL. First run takes a while
 // (pnpm install + task migrate + api boot); CI caches pnpm so
 // subsequent runs are fast. The api needs DATABASE_URL — see
@@ -221,9 +240,32 @@ export default defineConfig({
 `;
 }
 
-function e2eTestStrategyMd(isGo: boolean): string {
+function e2eTestStrategyMd(isGo: boolean, isMicroservices: boolean): string {
   const unitLevel = isGo
-    ? `### Unit tests
+    ? isMicroservices
+      ? `### Unit tests
+
+The modules. Each service's \`*_test.go\` exercises its own code in
+isolation. The auth shim's \`apps/api-auth/internal/auth/*_test.go\`
+files run **real** \`argon2\` + RSA/JWT signing (no mocks — decision
+22: real libraries, not mocks). The main api's
+\`apps/api/internal/jwks/jwks_test.go\` proves the local-verify
+mechanism (fetch → cache on TTL → verify) against a stub JWKS server.
+The items repo's \`apps/api/internal/items/items.repo_test.go\` runs
+against a real Postgres and skips cleanly when \`DATABASE_URL\` is
+not set (so the suite is green in environments without a DB). The web
+app's \`apps/web/src/lib/server.test.ts\` proves the server-side
+api-client's auth properties (token forwarding + refresh-on-401,
+decision 16).
+
+\`\`\`
+apps/api/internal/items/items.repo_test.go       # unit: real DB
+apps/api/internal/jwks/jwks_test.go              # unit: JWKS fetch/cache/verify
+apps/api-auth/internal/auth/{passwords,tokens,refresh}_test.go  # unit: real crypto
+apps/api-auth/internal/auth/auth.repo_test.go    # unit: real DB
+apps/web/src/lib/server.test.ts                  # unit: the api-client's auth properties
+\`\`\``
+      : `### Unit tests
 
 The modules. Each module's \`*_test.go\` exercises its own code in
 isolation. The auth shim's \`internal/auth/*_test.go\` files run
@@ -256,7 +298,24 @@ apps/api/src/internal/items/items.repo.test.ts    # unit: real DB
 apps/api/src/internal/auth/auth.repo.test.ts      # unit: real DB
 \`\`\``;
   const contractLevel = isGo
-    ? `### Contract tests
+    ? isMicroservices
+      ? `### Contract tests
+
+The spine. In polyglot shapes (this scaffold is one) the contract is
+the **committed specs** in \`packages/contract\` (decision 19: Go is
+the canonical side — each service's spec is generated from ITS Go
+structs). Shape 4 has two Go services, so the tripwires are:
+
+- \`apps/api/contract_test.go\` — proves the committed
+  \`openapi.api.yaml\` equals the main api's live spec (regenerate
+  from Go, commit — never hand-edit).
+- \`apps/api-auth/contract_test.go\` — proves the committed
+  \`openapi.auth.yaml\` equals the auth service's live spec.
+- \`packages/contract/test/generated.test.ts\` — proves the merged
+  \`openapi.yaml\` equals the merge of the two partials, and that the
+  committed TS client is byte-identical to what the generator produces
+  from the merged spec (regenerate via \`task contract:generate\`, commit).`
+      : `### Contract tests
 
 The spine. In polyglot shapes (this scaffold is one) the contract is
 the **committed \`openapi.yaml\`** in \`packages/contract\` (decision 19:
