@@ -6,9 +6,10 @@
 # Per issue 14 (ticket 12) the Go shapes gained the Next.js web
 # variant, so the Go rows now run the web unit tests, the web
 # typecheck, and the one Playwright E2E exactly like the TS rows.
-# Shape 4 (go-microservices, issue 15) is one more `backend: go` row —
-# every Go-step below applies to it unchanged (ticket 12 covers shape 4
-# by reuse).
+# Per issue 15 (shape 4 — go-microservices) the matrix gained a second
+# Go row: apps/api-auth (the sole minter) + JWKS-verified apps/api.
+# Every Go-step below applies to it unchanged (its Taskfile's go:test /
+# go:build / migrate targets cover both Go services).
 # Adding a new blessed combination (issue 18) is a single config
 # change: add a row to the matrix and a matching step in the
 # "scaffolded project" job.
@@ -45,7 +46,8 @@ jobs:
             backend: ts
           - shape: go-monolith
             backend: go
-          # Extensible: add `go-microservices` (backend: go) here per issue 15/18.
+          - shape: go-microservices
+            backend: go
 
     services:
       postgres:

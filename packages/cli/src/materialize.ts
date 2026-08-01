@@ -10,7 +10,7 @@
 // (`materialize`, `UnimplementedCompositionError`, `ProjectContext`)
 // is re-exported here unchanged so external imports keep working.
 
-import { type Composition, describeComposition, isGoMonolithNext, isImplemented, isTsMicroservicesVite } from './composition.js';
+import { type Composition, describeComposition, isGoMicroservicesNext, isGoMonolithNext, isImplemented, isTsMicroservicesVite } from './composition.js';
 // Re-exported to preserve the public API: external code imports
 // `ProjectContext` from '../src/materialize.js'.
 export type { ProjectContext } from './materialize/_shared.js';
@@ -27,7 +27,10 @@ import { writeApiAuthService } from './materialize/api-auth-service.js';
 import { writeDocs } from './materialize/docs.js';
 import { writeE2e } from './materialize/e2e.js';
 import { writeGoApi } from './materialize/go-api.js';
+import { writeGoApiAuthService } from './materialize/go-api-auth.js';
+import { writeGoApiMs } from './materialize/go-api-ms.js';
 import { writeGoContract } from './materialize/go-contract.js';
+import { writeGoContractMs } from './materialize/go-contract-ms.js';
 import { writeNextWeb } from './materialize/web-next.js';
 
 export class UnimplementedCompositionError extends Error {
@@ -46,13 +49,24 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   if (!isImplemented(composition)) {
     throw new UnimplementedCompositionError(composition);
   }
-  if (isGoMonolithNext(composition)) {
+  if (isGoMicroservicesNext(composition)) {
+    await writeGoMicroservicesNext(ctx, composition);
+  } else if (isGoMonolithNext(composition)) {
     await writeGoMonolithBase(ctx, composition);
   } else if (isTsMicroservicesVite(composition)) {
     await writeTsMicroservicesVite(ctx, composition);
   } else {
     await writeTsMonolithVite(ctx, composition);
   }
+}
+
+async function writeGoMicroservicesNext(ctx: ProjectContext, composition: Composition): Promise<void> {
+  await writeRoot(ctx, composition);
+  await writeGoApiMs(ctx);
+  await writeGoApiAuthService(ctx);
+  await writeGoContractMs(ctx);
+  await writeNextWeb(ctx, composition);
+  await writeE2e(ctx, composition);
 }
 
 async function writeGoMonolithBase(ctx: ProjectContext, composition: Composition): Promise<void> {

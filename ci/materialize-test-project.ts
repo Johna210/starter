@@ -12,7 +12,7 @@
 
 import { resolve } from 'node:path';
 import { rm } from 'node:fs/promises';
-import { type Composition, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../packages/cli/src/composition.js';
+import { type Composition, GO_MICROSERVICES_NEXT, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../packages/cli/src/composition.js';
 import { materialize } from '../packages/cli/src/materialize.js';
 
 function compositionForShape(shape: string): Composition {
@@ -25,6 +25,8 @@ function compositionForShape(shape: string): Composition {
       return TS_MICROSERVICES_VITE;
     case 'go-monolith':
       return GO_MONOLITH_NEXT;
+    case 'go-microservices':
+      return GO_MICROSERVICES_NEXT;
     default:
       throw new Error(`Unknown shape: ${shape}`);
   }
