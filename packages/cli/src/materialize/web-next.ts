@@ -144,7 +144,10 @@ const API_AUTH_URL = process.env.API_AUTH_URL ?? 'http://localhost:3001';
 
 const nextConfig: NextConfig = {
   rewrites: async () => [
-    { source: '/api/auth/:path*', destination: \`\${API_AUTH_URL}/:path*\` },
+    // The auth service owns /auth/*; the rewrite keeps the /auth
+    // prefix (mirrors the Vite variant's proxy, which strips only
+    // /api): /api/auth/register -> :3001/auth/register.
+    { source: '/api/auth/:path*', destination: \`\${API_AUTH_URL}/auth/:path*\` },
     { source: '/api/:path*', destination: \`\${API_URL}/:path*\` },
   ],
 };

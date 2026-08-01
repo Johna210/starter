@@ -285,6 +285,9 @@ describe('Go-microservices + Next + no-mobile + no-AI (shape 4, issue #15)', () 
     const cfg = await readFile(join(webDir, 'next.config.ts'), 'utf8');
     expect(cfg).toMatch(/\/api\/auth\/:path\*/);
     expect(cfg).toMatch(/localhost:3001/);
+    // The auth rewrite must PRESERVE the /auth prefix (the auth
+    // service owns /auth/*): /api/auth/register -> :3001/auth/register.
+    expect(cfg).toMatch(/API_AUTH_URL}\/auth\/:path\*/);
     const config = await readFile(join(webDir, 'src/config.ts'), 'utf8');
     expect(config).toMatch(/http:\/\/localhost:3001/);
   });
