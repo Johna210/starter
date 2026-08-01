@@ -626,7 +626,8 @@ valid Bearer access token is required on every request:
 # 3. (Optional) Set JWT_PRIVATE_KEY in apps/api-auth/.env to a
 #    PEM-encoded RSA key (see .env.example for the openssl command).
 #    When unset, api-auth generates an ephemeral key at boot — fine
-#    for dev; the api re-fetches the JWKS after a restart.
+#    for dev; apps/api re-fetches the JWKS once its cache TTL elapses
+#    (default 300s).
 
 # 4. Install the contract tooling, apply migrations, and boot the stack.
 pnpm install

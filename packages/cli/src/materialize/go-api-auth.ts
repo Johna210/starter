@@ -414,7 +414,8 @@ type Config struct {
 	DatabaseURL string
 	// JWTPrivateKey is an optional PEM-encoded RSA signing key. When
 	// empty the service generates an ephemeral key at boot (dev
-	// convenience — the api re-fetches the JWKS after a restart).
+	// convenience — apps/api re-fetches the JWKS once its cache TTL
+	// elapses, so a key rotation takes effect within that window).
 	JWTPrivateKey string
 	// Port the service listens on (default 3001; apps/api runs on
 	// 3000 by default).
