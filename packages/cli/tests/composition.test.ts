@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type Composition,
   describeComposition,
+  GO_MICROSERVICES_NEXT,
   GO_MONOLITH_NEXT,
   isImplemented,
   TS_MONOLITH_VITE,
@@ -27,9 +28,8 @@ describe('composition', () => {
       expect(isImplemented(c)).toBe(false);
     });
 
-    it('returns false for Go + microservices (shape 4 — not yet implemented)', () => {
-      const c: Composition = { ...TS_MONOLITH_VITE, backend: 'go', topology: 'microservices' };
-      expect(isImplemented(c)).toBe(false);
+    it('returns true for Go + microservices + Next (shape 4 — implemented in issue #15)', () => {
+      expect(isImplemented(GO_MICROSERVICES_NEXT)).toBe(true);
     });
 
     it('returns false when web variant differs (Next instead of Vite)', () => {
