@@ -504,6 +504,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"starter/apps/api-auth/internal/jwks"
 )
 
 // TokenKind discriminates the two token kinds (decision 16: short-lived
@@ -535,7 +537,10 @@ func (e *InvalidTokenError) Error() string { return e.msg }
 var ErrInvalidToken = errors.New("auth: invalid token")
 
 // SignToken signs a token for the given user with the configured TTL
-// for its kind. The claims' iat/exp are set here.
+// for its kind. The claims' iat/exp are set here, and the kid header is
+// stamped from the public key's deterministic fingerprint
+// (jwks.KidFor — the same value the JWKS document serves), so apps/api
+// can pick the matching key from the set when it verifies locally.
 func SignToken(priv *rsa.PrivateKey, userID string, kind TokenKind, jti string, ttl time.Duration) (string, error) {
 	now := time.Now()
 	claims := Claims{
@@ -548,6 +553,7 @@ func SignToken(priv *rsa.PrivateKey, userID string, kind TokenKind, jti string, 
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = jwks.KidFor(&priv.PublicKey)
 	signed, err := token.SignedString(priv)
 	if err != nil {
 		return "", fmt.Errorf("auth: sign token: %w", err)
@@ -829,7 +835,7 @@ func NewJWKSDocument(pub *rsa.PublicKey) JWKSDocument {
 	return JWKSDocument{Keys: []JWK{
 		{
 			Kty: "RSA",
-			Kid: kidFor(pub),
+			Kid: KidFor(pub),
 			Use: "sig",
 			Alg: "RS256",
 			N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
@@ -838,7 +844,11 @@ func NewJWKSDocument(pub *rsa.PublicKey) JWKSDocument {
 	}}
 }
 
-func kidFor(pub *rsa.PublicKey) string {
+// KidFor returns the deterministic key id for a public key — the first
+// 16 bytes of the SHA-256 of its PKCS#1 DER encoding, base64url. The
+// SIGNING side stamps this into every JWT's kid header (tokens.go), so
+// the verifying side (apps/api) can pick the matching key from the set.
+func KidFor(pub *rsa.PublicKey) string {
 	sum := sha256.Sum256(x509.MarshalPKCS1PublicKey(pub))
 	return base64.RawURLEncoding.EncodeToString(sum[:16])
 }
@@ -1263,6 +1273,10 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+
+	"starter/apps/api-auth/internal/jwks"
 )
 
 func testKey(t *testing.T) (priv *rsa.PrivateKey, pub *rsa.PublicKey) {
@@ -1327,6 +1341,26 @@ func TestVerifyGarbage(t *testing.T) {
 	_, pub := testKey(t)
 	if _, err := VerifyToken(pub, "not-a-jwt"); err == nil {
 		t.Fatal("verify of garbage should fail")
+	}
+}
+
+func TestSignTokenStampsKid(t *testing.T) {
+	priv, pub := testKey(t)
+	token, err := SignToken(priv, "user-1", TokenKindAccess, "", time.Minute)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	// The kid header is what apps/api matches against when it picks the
+	// key from the fetched JWKS (decision 11). If this drifts, every
+	// real token 401s at the main api.
+	parsed, _, err := new(jwt.Parser).ParseUnverified(token, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	kid, _ := parsed.Header["kid"].(string)
+	want := jwks.KidFor(pub)
+	if kid != want {
+		t.Errorf("kid header = %q, want %q (the fingerprint the JWKS serves)", kid, want)
 	}
 }
 

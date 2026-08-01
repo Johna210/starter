@@ -114,6 +114,10 @@ describe('Go-microservices + Next + no-mobile + no-AI (shape 4, issue #15)', () 
     expect(tokens).toMatch(/SigningMethodRS256/);
     expect(tokens).toMatch(/ParsePrivateKeyPEM/);
     expect(tokens).toMatch(/GeneratePrivateKey/);
+    // Every signed token carries the kid fingerprint apps/api matches
+    // against the fetched JWKS (decision 11) — regression guard.
+    expect(tokens).toMatch(/token\.Header\["kid"\]/);
+    expect(tokens).toMatch(/jwks\.KidFor/);
     // The four auth endpoints (the capability axis: auth/IAM).
     const idx = await readFile(join(authDir, 'internal/auth/index.go'), 'utf8');
     for (const ep of ['register', 'login', 'refresh', 'logout']) {
