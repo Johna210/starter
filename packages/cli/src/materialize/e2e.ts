@@ -218,6 +218,12 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   workers: 1,
+  // The one E2E is integration-heavy (real browser + api + Postgres,
+  // often under 4 parallel CI jobs on one runner). A single retry on
+  // CI rides out the occasional cold-boot timeout instead of failing
+  // the whole PR; the 'trace: on-first-retry' option below captures
+  // the retry.
+  retries: process.env.CI ? 1 : 0,
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:5173',
