@@ -18,6 +18,13 @@
 # over items. The starter repo's own tests (contract.sh + vitest)
 # run first; then the CI materialises a fresh scaffolded project
 # and runs its full suite including the Playwright E2E.
+#
+# Caching (issue 38): the scaffolded project has no committed
+# lockfile, so setup-node/setup-go's default caches (keyed on the
+# starter repo's own lockfiles) never cover its deps. All caches are
+# keyed on the materializer source tree — the deterministic input to
+# every scaffolded project's package.json / go.mod — so a template
+# change busts the key exactly when the dep set can change.
 
 name: CI
 
@@ -78,7 +85,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+
+      # ── Caches for the scaffolded project's dependencies ─────────
+      # The test project's deps (pnpm store, Go modules, Playwright
+      # browsers) are keyed on the materializer source tree below, so
+      # they bust exactly when a template change can alter them. The
+      # store/module caches are shape-keyed so each shape's snapshot
+      # accumulates independently (a shared key would freeze the first
+      # writer's snapshot forever). Playwright browsers are identical
+      # across shapes and shared. restore-keys reuse the previous
+      # snapshot after a bust, so unchanged deps stay cached.
+      - name: Cache pnpm store (${{ matrix.shape }})
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-store-${{ matrix.shape }}-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'packages/cli/package.json', 'packages/cli/src/**') }}
+          restore-keys: |
+            pnpm-store-${{ matrix.shape }}-${{ runner.os }}-
+
+      - name: Cache Go modules (${{ matrix.shape }})
+        if: matrix.backend == 'go'
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ matrix.shape }}-${{ runner.os }}-${{ hashFiles('packages/cli/src/**') }}
+          restore-keys: |
+            go-mod-${{ matrix.shape }}-${{ runner.os }}-
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('packages/cli/src/**') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
 
       - name: Setup Go (Go shapes)
         if: matrix.backend == 'go'
@@ -176,8 +217,15 @@ jobs:
       # ── E2E (Playwright over the items flow, decision 22) ──────
       # Every blessed combo ships the one E2E: the web (Vite or Next)
       # composes with the api and Postgres through a real browser.
+      # Browser cache hits skip the apt install-deps entirely (that's
+      # the slow half of --with-deps); on a miss both halves run.
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install-deps chromium
+        working-directory: /tmp/test-project
+
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
         working-directory: /tmp/test-project
 
       - name: E2E — items flow
