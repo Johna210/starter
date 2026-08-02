@@ -41,7 +41,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -65,11 +65,15 @@ jobs:
           POSTGRES_DB: starter
         ports:
           - 5432:5432
+        # Postgres is ready in ~5s; with a 10s interval the container
+        # step waited ~15s per job (issue 38). Check every 5s after a
+        # 5s grace period instead.
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+          --health-start-period 5s
 
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/starter
