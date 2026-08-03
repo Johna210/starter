@@ -3,6 +3,7 @@ import {
   type Composition,
   describeComposition,
   GO_MICROSERVICES_NEXT,
+  GO_MICROSERVICES_NEXT_AI,
   GO_MONOLITH_NEXT,
   isImplemented,
   TS_MONOLITH_VITE,
@@ -44,9 +45,15 @@ describe('composition', () => {
       }
     });
 
-    it('returns false when AI is on', () => {
-      const c: Composition = { ...TS_MONOLITH_VITE, ai: 'on' };
-      expect(isImplemented(c)).toBe(false);
+    it('returns true for Go + microservices + Next + AI (shape 4 + AI — implemented in issue #16)', () => {
+      expect(isImplemented(GO_MICROSERVICES_NEXT_AI)).toBe(true);
+    });
+
+    it('returns false when AI is on for every other shape (AI is a shape-4-only axis today)', () => {
+      for (const base of [TS_MONOLITH_VITE, GO_MONOLITH_NEXT]) {
+        const c: Composition = { ...base, ai: 'on' };
+        expect(isImplemented(c), `${describeComposition(c)} should be unimplemented`).toBe(false);
+      }
     });
   });
 

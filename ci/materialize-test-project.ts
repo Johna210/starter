@@ -7,12 +7,12 @@
 //
 // Usage: npx tsx ci/materialize-test-project.ts [target-dir] [shape]
 //
-// shape: 'ts-monolith' (default) | 'ts-microservices' | 'go-monolith'
+// shape: 'ts-monolith' (default) | 'ts-microservices' | 'go-monolith' | 'go-microservices' | 'go-microservices-ai'
 // target-dir defaults to /tmp/test-project.
 
 import { resolve } from 'node:path';
 import { rm } from 'node:fs/promises';
-import { type Composition, GO_MICROSERVICES_NEXT, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../packages/cli/src/composition.js';
+import { type Composition, GO_MICROSERVICES_NEXT, GO_MICROSERVICES_NEXT_AI, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../packages/cli/src/composition.js';
 import { materialize } from '../packages/cli/src/materialize.js';
 
 function compositionForShape(shape: string): Composition {
@@ -27,6 +27,8 @@ function compositionForShape(shape: string): Composition {
       return GO_MONOLITH_NEXT;
     case 'go-microservices':
       return GO_MICROSERVICES_NEXT;
+    case 'go-microservices-ai':
+      return GO_MICROSERVICES_NEXT_AI;
     default:
       throw new Error(`Unknown shape: ${shape}`);
   }

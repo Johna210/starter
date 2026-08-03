@@ -10,6 +10,18 @@
 # Go row: apps/api-auth (the sole minter) + JWKS-verified apps/api.
 # Every Go-step below applies to it unchanged (its Taskfile's go:test /
 # go:build / migrate targets cover both Go services).
+# Per issue 16 (shape 4 + AI on) a FIFTH row was added,
+# go-microservices-ai. **Documented warning (decisions 24/29): AI is
+# NOT in the blessed matrix.** This row exists to prove the AI-on
+# composition materializes and its testable parts stay green — the AI
+# service's unit tests against a FakeProvider, ruff (decision 29), the
+# Go unit/contract tests including the internal/ai proxy, and the
+# contract tripwires (openapi.ai.yaml == live FastAPI spec, committed
+# Go client == generator output). There is no real-LLM round-trip and
+# no E2E for this row (AI ships no example composition to E2E, and a
+# mocked-LLM round-trip is a unit test, not a CI integration). The
+# row is "generatable but not CI-tested" in the blessed sense — the
+# items E2E guarantee applies only to the 4 blessed combos.
 # Adding a new blessed combination (issue 18) is a single config
 # change: add a row to the matrix and a matching step in the
 # "scaffolded project" job.
@@ -23,8 +35,9 @@
 # lockfile, so setup-node/setup-go's default caches (keyed on the
 # starter repo's own lockfiles) never cover its deps. All caches are
 # keyed on the materializer source tree — the deterministic input to
-# every scaffolded project's package.json / go.mod — so a template
-# change busts the key exactly when the dep set can change.
+# every scaffolded project's package.json / go.mod / pyproject.toml —
+# so a template change busts the key exactly when the dep set can
+# change.
 
 name: CI
 
@@ -55,6 +68,19 @@ jobs:
             backend: go
           - shape: go-microservices
             backend: go
+          # Issue #16: shape 4 + AI on. Documented warning (decisions
+          # 24/29): AI is generatable but NOT CI-tested in the blessed
+          # sense — this row proves the composition materializes and
+          # its unit-tested parts (mocked provider, ruff, contract
+          # tripwires) stay green. No E2E runs for this row (the E2E
+          # steps skip when matrix.ai is true).
+          - shape: go-microservices-ai
+            backend: go
+            # String, not YAML boolean: the step guards compare
+            # matrix.ai == 'true' — GitHub's loose equality coerces
+            # 'true' -> true, but a YAML boolean would depend on
+            # runtime type coercion. A string is unambiguous.
+            ai: 'true'
 
     services:
       postgres:
@@ -99,6 +125,15 @@ jobs:
       # writer's snapshot forever). Playwright browsers are identical
       # across shapes and shared. restore-keys reuse the previous
       # snapshot after a bust, so unchanged deps stay cached.
+      - name: Cache pip (AI-on row)
+        if: matrix.ai == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('packages/cli/src/**') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
       - name: Cache pnpm store (${{ matrix.shape }})
         uses: actions/cache@v4
         with:
@@ -152,6 +187,15 @@ jobs:
 
       - name: Install dependencies (test project)
         run: pnpm install
+        working-directory: /tmp/test-project
+
+      # ── AI-on row: install the Python service's deps (venv) ───────
+      # The AI service is materialized only for shape 4 + AI on; the
+      # venv powers dev:ai, ai:test, ai:lint and the contract
+      # generation step below.
+      - name: Install AI service deps (AI-on row)
+        if: matrix.ai == 'true'
+        run: task ai:install
         working-directory: /tmp/test-project
 
       - name: Run migrations
@@ -218,21 +262,38 @@ jobs:
           pnpm --filter @starter/web typecheck
         working-directory: /tmp/test-project
 
+      # ── AI-on row: the AI service's own suite (decisions 29) ──────
+      # Unit tests against a FakeProvider (a mocked-LLM round-trip is
+      # a unit test, not a CI integration) + the contract tripwire
+      # (committed openapi.ai.yaml == live FastAPI spec) + ruff lint
+      # (decision 29's one-tool discipline).
+      - name: Scaffolded project — AI unit + contract tests + ruff (AI-on row)
+        if: matrix.ai == 'true'
+        run: |
+          task ai:test
+          task ai:lint
+        working-directory: /tmp/test-project
+
       # ── E2E (Playwright over the items flow, decision 22) ──────
       # Every blessed combo ships the one E2E: the web (Vite or Next)
       # composes with the api and Postgres through a real browser.
       # Browser cache hits skip the apt install-deps entirely (that's
       # the slow half of --with-deps); on a miss both halves run.
+      # The AI-on row SKIPS the E2E entirely (decisions 24/29: AI is
+      # generatable but not CI-tested; the items-E2E guarantee applies
+      # to the 4 blessed combos only).
       - name: Install Playwright system deps
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.playwright-cache.outputs.cache-hit != 'true' && matrix.ai != 'true'
         run: pnpm exec playwright install-deps chromium
         working-directory: /tmp/test-project
 
       - name: Install Playwright browsers
+        if: matrix.ai != 'true'
         run: pnpm exec playwright install chromium
         working-directory: /tmp/test-project
 
       - name: E2E — items flow
+        if: matrix.ai != 'true'
         run: pnpm test:e2e
         working-directory: /tmp/test-project
         env:

@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { GO_MICROSERVICES_NEXT, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
+import { GO_MICROSERVICES_NEXT, GO_MICROSERVICES_NEXT_AI, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
 import { materialize } from '../src/materialize.js';
 
 const exec = promisify(execFile);
@@ -159,6 +159,40 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
         cwd: join(targetDir, 'apps/web'),
       });
       expect(webTestOut + webTestErr, 'web unit tests failed').not.toMatch(/failed|error/);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'the materialized Go-microservices + AI project typechecks its contract client and web (issue #16)',
+    async () => {
+      // 1. Materialize (shape 4 + AI on: the Python AI service + the
+      // generated Go client land in the contract package).
+      await materialize({ targetDir, name: 'e2e-app' }, GO_MICROSERVICES_NEXT_AI);
+
+      // 2. Install
+      await exec('pnpm', ['install', '--prefer-offline'], { cwd: targetDir });
+
+      // 3. Typecheck the TS contract client (@starter/contract) — the
+      // merged spine now includes the /ai proxy surface.
+      const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
+        cwd: join(targetDir, 'packages/contract'),
+      });
+      expect(stdout + stderr, 'tsc failed in packages/contract').not.toMatch(/error TS/);
+
+      // 4. The contract package's tests prove the committed artifacts
+      // equal the generators' output — the merged spine tripwire AND
+      // the AI Go-client tripwire (generated-go.test.ts, issue #16).
+      const { stdout: testOut, stderr: testErr } = await exec('pnpm', ['test'], {
+        cwd: join(targetDir, 'packages/contract'),
+      });
+      expect(testOut + testErr, 'contract client tests failed').not.toMatch(/failed|error/);
+
+      // 5. The Next web app typechecks end-to-end.
+      const { stdout: webOut, stderr: webErr } = await exec('pnpm', ['typecheck'], {
+        cwd: join(targetDir, 'apps/web'),
+      });
+      expect(webOut + webErr, 'tsc failed in apps/web').not.toMatch(/error TS/);
     },
     TIMEOUT,
   );

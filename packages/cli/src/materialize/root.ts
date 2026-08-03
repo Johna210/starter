@@ -86,6 +86,195 @@ function rootPnpmWorkspaceYaml(): string {
 }
 
 function rootTaskfileYml(composition: Composition): string {
+  if (composition.backend === 'go' && composition.topology === 'microservices' && composition.ai === 'on') {
+    return `# Taskfile.yml — scaffolded orchestrator (shape 4: Go-microservices + Next.js web + AI on).
+#
+# Boot the stack with \`task dev\` — FOUR processes in parallel: web,
+# api (main), api-auth (the sole minter, decision 11), and the
+# Python/FastAPI AI service (issue #16, decision 5). Per decision 19
+# the Go services are the canonical side: the contract
+# (packages/contract/openapi.{api,auth}.yaml + the merged openapi.yaml
+# + the TS client) is generated FROM the Go structs and committed —
+# never edited by hand. The AI service is the canonical side of ITS
+# OWN contract (packages/contract/openapi.ai.yaml, Python-generated),
+# which feeds the Go client apps/api uses (issue #16).
+#
+# The AI service ships composable primitives with NO example
+# composition (decision 20) and is NOT in the blessed CI matrix
+# (decisions 24/29: generatable but not CI-tested) — run \`task
+# ai:install\` once, then \`task ai:test\` / \`task ai:lint\` to verify it.
+
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  dev:
+    desc: Boot the full stack (web + api + api-auth + ai) in parallel
+    cmds:
+      - 'task dev:web & task dev:api & task dev:api-auth & task dev:ai & wait'
+
+  dev:api:
+    desc: "Boot the main api on http://localhost:3000 (OpenAPI: /openapi.json)"
+    dir: apps/api
+    cmds:
+      - go run ./cmd/api
+
+  dev:api-auth:
+    desc: "Boot the auth service on http://localhost:3001 (sole minter, decision 11; JWKS: /.well-known/jwks.json)"
+    dir: apps/api-auth
+    cmds:
+      - go run ./cmd/api
+
+  dev:ai:
+    desc: "Boot the Python/FastAPI AI service on http://localhost:3200 (issue #16; run task ai:install first)"
+    dir: apps/ai
+    cmds:
+      - .venv/bin/uvicorn app.main:app --port 3200 --reload
+
+  dev:web:
+    desc: Boot the Next web on http://localhost:5173 (/api is proxied to the api + api-auth)
+    dir: apps/web
+    cmds:
+      - pnpm dev
+
+  ai:install:
+    desc: "Create the apps/ai venv and install deps (fastapi, uvicorn, the openai SDK; dev: pytest + ruff)"
+    dir: apps/ai
+    cmds:
+      - python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+
+  ai:test:
+    desc: "Run the AI service's unit + contract tests (pytest; the contract tripwire needs the committed spec)"
+    dir: apps/ai
+    cmds:
+      - .venv/bin/python -m pytest
+
+  ai:lint:
+    desc: "Lint the AI service with ruff (decision 29's one-tool discipline)"
+    dir: apps/ai
+    cmds:
+      - .venv/bin/ruff check .
+
+  test:
+    desc: Run all tests (unit + contract + AI + the one E2E, decision 22)
+    cmds:
+      - task go:test
+      - task test:contract
+      - task test:web
+      - task ai:test
+      - task ai:lint
+      - task test:e2e
+
+  go:test:
+    desc: Go unit + contract tests for BOTH services. Repo/contract tests skip cleanly when DATABASE_URL is unset.
+    cmds:
+      - task go:test:api
+      - task go:test:api-auth
+
+  go:test:api:
+    dir: apps/api
+    cmds:
+      - go test ./...
+
+  go:test:api-auth:
+    dir: apps/api-auth
+    cmds:
+      - go test ./...
+
+  go:build:
+    desc: Compile both Go services
+    cmds:
+      - task go:build:api
+      - task go:build:api-auth
+
+  go:build:api:
+    dir: apps/api
+    cmds:
+      - go build ./...
+
+  go:build:api-auth:
+    dir: apps/api-auth
+    cmds:
+      - go build ./...
+
+  go:vet:
+    desc: Vet both Go services
+    cmds:
+      - task go:vet:api
+      - task go:vet:api-auth
+
+  go:vet:api:
+    dir: apps/api
+    cmds:
+      - go vet ./...
+
+  go:vet:api-auth:
+    dir: apps/api-auth
+    cmds:
+      - go vet ./...
+
+  test:contract:
+    desc: Contract client tests (committed client == committed spec, decision 19)
+    dir: packages/contract
+    cmds:
+      - pnpm test
+
+  test:web:
+    desc: Web unit tests (the api-client's auth properties, decision 16)
+    dir: apps/web
+    cmds:
+      - pnpm test
+
+  test:e2e:
+    desc: Run the one E2E (items flow). Requires DATABASE_URL + task migrate.
+    cmds:
+      - pnpm test:e2e
+
+  migrate:
+    desc: "Apply pending DB migrations in BOTH services (DATABASE_URL must be set in each app's .env — config.go validates it)"
+    cmds:
+      - task migrate:api
+      - task migrate:api-auth
+
+  migrate:api:
+    dir: apps/api
+    cmds:
+      - go run ./cmd/migrate
+
+  migrate:api-auth:
+    dir: apps/api-auth
+    cmds:
+      - go run ./cmd/migrate
+
+  contract:generate:
+    desc: Regenerate the contract (decision 19) — both Go partial specs, the AI spec, the merge, then both clients. Commit the diff.
+    cmds:
+      - 'cd apps/api && go run ./cmd/specgen'
+      - 'cd apps/api-auth && go run ./cmd/specgen'
+      - 'cd apps/ai && .venv/bin/python scripts/export_openapi.py'
+      - 'node packages/contract/scripts/merge-openapi.mjs'
+      - 'node packages/contract/scripts/generate-go-client.mjs'
+      - 'pnpm --filter @starter/contract generate'
+
+  build:
+    desc: Build all workspaces
+    cmds:
+      - task go:build
+      - task build:web
+
+  build:web:
+    desc: Production-build the web (next build)
+    dir: apps/web
+    cmds:
+      - pnpm build
+`;
+  }
+
   if (composition.backend === 'go' && composition.topology === 'microservices') {
     return `# Taskfile.yml — scaffolded orchestrator (shape 4: Go-microservices + Next.js web).
 #
@@ -601,6 +790,107 @@ coverage/
 
 function rootReadme(name: string, composition: Composition): string {
   if (composition.backend === 'go' && composition.topology === 'microservices') {
+
+    const isAi = composition.ai === 'on';
+    const aiInstall = isAi
+      ? `**AI on (issue #16)**: \`task dev\` also boots the Python/FastAPI AI
+service, so install its deps once before booting:
+
+\`\`\`sh
+task ai:install   # creates apps/ai/.venv and installs fastapi/uvicorn + the openai SDK
+\`\`\`
+`
+      : '';
+    const aiBoot = isAi
+      ? `\`task dev\` boots **four** processes in parallel: \`apps/api-auth\` (the
+auth service on http://localhost:3001 — the sole minter, decision 11),
+\`apps/api\` (the main api on http://localhost:3000, OpenAPI served at
+\`/openapi.json\`), \`apps/ai\` (the AI service on
+http://localhost:3200, its spec at \`/openapi.json\`) and \`apps/web\`
+(Next.js on http://localhost:5173).`
+      : `\`task dev\` boots **three** processes in parallel: \`apps/api-auth\` (the
+auth service on http://localhost:3001 — the sole minter, decision 11),
+\`apps/api\` (the main api on http://localhost:3000, OpenAPI served at
+\`/openapi.json\`) and \`apps/web\` (Next.js on http://localhost:5173).`;
+    const aiSpinePara = isAi
+      ? `
+**The AI service** (issue #16, decision 5/20): \`apps/ai\` is a
+Python/FastAPI service exposing the composable AI primitives — chat
+completion (with streaming via SSE), embeddings, a \`VectorStore\`
+interface, and tool/function calling — over its own contract surface.
+Its spec (\`packages/contract/openapi.ai.yaml\`) is **generated from the
+Python app** and committed; the **Go client**
+(\`packages/contract/clients/go\`) is generated from that spec, and
+\`apps/api\` reaches the service **only through that client** (the /ai
+routes on the api are JSON proxies — the web reaches AI through the
+api, never directly). **No example composition is shipped** (decision
+20): these are primitives — composing them into a product (RAG,
+recommendation, agentic) is your job. AI-on scaffolds are
+**generatable but not CI-tested** (decisions 24/29): the blessed
+matrix tests web + mobile, never AI.`
+      : '';
+    const aiMermaidApi = isAi ? `\n        AI["internal/ai<br/>JSON proxies via the Go client"]` : '';
+    const aiMermaidRb = isAi ? '/items + /ai' : '/items';
+    const aiMermaidSubgraph = isAi
+      ? `
+    subgraph "apps/ai (FastAPI, :3200)"
+        AIAPP["FastAPI app<br/>/ai/* primitives"]
+        PYSTORE["VectorStore (in-memory default)"]
+    end`
+      : '';
+    const aiMermaidContract = isAi
+      ? `
+        AIYAML["openapi.ai.yaml<br/>Python-generated, committed"]
+        GOCLIENT["clients/go/ — generated Go client"]`
+      : '';
+    const aiMermaidEdges = isAi
+      ? `    RB -->|requireAuth + mounts| AI
+    AI -->|Go client call| AIAPP
+    AIAPP -->|uses| PYSTORE
+    AIYAML -. "export_openapi.py" .-> AIAPP
+    GOCLIENT -. "generated from" .-> AIYAML
+    AI -. "imports" .-> GOCLIENT
+`
+      : '';
+    const aiExtendBullet = isAi
+      ? `
+- **Compose the AI primitives** (issue #16, decision 20): the AI
+  service ships chat completion (with streaming), embeddings, the
+  \`VectorStore\` interface, and tool calling — composing them into a
+  product (RAG = embeddings + vector store + chat; agentic = chat +
+  tools) is your job. The seams: the Python primitives in
+  \`apps/ai/app/primitives/\`, the Go client in
+  \`packages/contract/clients/go\`, and the \`/ai\` proxy routes on
+  apps/api (JSON forms; streaming is served by apps/ai directly as
+  SSE). New provider keys go in \`apps/ai/.env\` (OPENAI_API_KEY).`
+      : '';
+    const aiTaskRows = isAi
+      ? `
+| \`task ai:install\` | Create apps/ai/.venv and install the AI service's Python deps |
+| \`task dev:ai\` | Boot just the AI service (:3200) |
+| \`task ai:test\` | Run the AI service's unit + contract tests (pytest) |
+| \`task ai:lint\` | Lint the AI service with ruff (decision 29) |`
+      : '';
+    const aiContractGenerateLine = isAi
+      ? 'Regenerate both Go partial specs, the AI spec, the merge, and both clients (commit the diff)'
+      : 'Regenerate both partial specs from Go, merge, and regenerate the TS client (commit the diff)';
+    const aiTestMention = isAi
+      ? `
+- **AI unit tests** — \`apps/ai\`'s pytest suite exercises the
+  primitives against a FakeProvider (decision 29: a mocked-LLM
+  round-trip is a unit test), and apps/api's \`internal/ai\` tests
+  prove the proxy calls the service through the Go client.`
+      : '';
+    const aiContractTestMention = isAi
+      ? `the contract package's own tests prove the merged spec equals the
+  merge of the partials and that the committed clients (TS + the AI
+  Go client) equal the generators' output; apps/ai's
+  \`tests/test_contract.py\` proves its committed spec equals the live
+  FastAPI spec.`
+      : `the contract package's own test proves the merged spec equals the
+  merge of the partials and that the committed client equals the
+  generator's output.`;
+
     return `# ${name}
 
 A fullstack monorepo scaffolded from
@@ -635,10 +925,7 @@ task migrate
 task dev
 \`\`\`
 
-\`task dev\` boots **three** processes in parallel: \`apps/api-auth\` (the
-auth service on http://localhost:3001 — the sole minter, decision 11),
-\`apps/api\` (the main api on http://localhost:3000, OpenAPI served at
-\`/openapi.json\`) and \`apps/web\` (Next.js on http://localhost:5173).
+${aiInstall}${aiBoot}
 Next rewrites \`/api/auth/*\` to api-auth and \`/api/*\` to api, so the
 browser sees one same-origin endpoint and the httpOnly refresh cookie
 stays first-party.
@@ -729,8 +1016,8 @@ half sends the browser through the \`/refresh\` bridge (a route handler
 (both specgens + the merge + the client), commit — the spec and the TS
 client follow (the scaffold's tests enforce this: each service's
 \`contract_test.go\` proves its committed partial equals its live spec,
-and the contract package's own test proves the merged spec and the
-committed client equal the generators' output).
+and ${aiContractTestMention})${aiSpinePara}
+
 
 \`\`\`mermaid
 graph LR
@@ -745,13 +1032,13 @@ graph LR
         DB1["Postgres (pgx)<br/>users + refresh_tokens"]
     end
     subgraph "apps/api (Gin + Huma, :3000)"
-        RB["huma.API<br/>/items"]
-        ITEMS["internal/items<br/>typed ItemsRepo"]
+        RB["huma.API<br/>${aiMermaidRb}"]
+        ITEMS["internal/items<br/>typed ItemsRepo"]${aiMermaidApi}
         JWKS["internal/jwks<br/>fetch + cache + verify locally"]
         DB2["Postgres (pgx)<br/>items"]
-    end
+    end${aiMermaidSubgraph}
     subgraph "packages/contract (the only package)"
-        YAML["openapi.yaml<br/>merged from the two Go partials, committed"]
+        YAML["openapi.yaml<br/>merged from the two Go partials, committed"]${aiMermaidContract}
         TS["src/ — generated TS client"]
         DART["clients/dart/ — Dart client (Flutter, ticket 17)"]
     end
@@ -761,7 +1048,7 @@ graph LR
     P -->|/api/*| RB
     RA -->|mounts| AUTH
     AUTH -->|uses| DB1
-    RB -->|requireAuth + mounts| ITEMS
+${aiMermaidEdges}    RB -->|requireAuth + mounts| ITEMS
     RB -->|verifies via| JWKS
     JWKS -.->|fetches + caches| RA
     ITEMS -->|uses| DB2
@@ -791,7 +1078,7 @@ The scaffold ships honest seams — each is a documented extension point:
   \`apps/web/src/lib/client.ts\` for client components).
 - **Wire a fence from the auth shim** (email-verify, password reset,
   MFA, OAuth, RBAC): the auth shim's scope is fixed by decision 12 —
-  fenced capabilities land in \`apps/api-auth\`'s route handlers.
+  fenced capabilities land in \`apps/api-auth\`'s route handlers.${aiExtendBullet}
 
 ## How to grow
 
@@ -819,7 +1106,7 @@ don't refactor:
 | \`task test:web\` | Web unit tests (the api-client's decision-16 auth properties) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task migrate\` | Apply pending DB migrations in both services |
-| \`task contract:generate\` | Regenerate both partial specs from Go, merge, and regenerate the TS client (commit the diff) |
+| \`task contract:generate\` | ${aiContractGenerateLine} |${aiTaskRows}
 | \`task build\` | Build all workspaces (both Go services + web) |
 
 ## Tests — unit + contract + the one E2E (decision 22)
@@ -835,9 +1122,7 @@ The scaffold ships three test levels:
 - **Contract** — each Go service's \`contract_test.go\` validates its
   committed partial spec (\`openapi.api.yaml\` / \`openapi.auth.yaml\`)
   against its live server (spec equality + schema-checked route flows);
-  the contract package's own test proves the merged spec equals the
-  merge of the partials and that the committed client equals the
-  generator's output.
+  ${aiContractTestMention}${aiTestMention}
 - **E2E** — exactly one (\`e2e/items-flow.spec.ts\`, decision 22): a real
   browser drives register → login → list → create → reload on the Next
   web against the real api-auth + api + Postgres — the composition
