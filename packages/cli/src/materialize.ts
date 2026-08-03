@@ -10,7 +10,7 @@
 // (`materialize`, `UnimplementedCompositionError`, `ProjectContext`)
 // is re-exported here unchanged so external imports keep working.
 
-import { type Composition, describeComposition, isGoMicroservicesNext, isGoMonolithNext, isImplemented, isTsMicroservicesVite } from './composition.js';
+import { type Composition, describeComposition, isGoMicroservicesNext, isGoMicroservicesNextAi, isGoMonolithNext, isImplemented, isTsMicroservicesVite } from './composition.js';
 // Re-exported to preserve the public API: external code imports
 // `ProjectContext` from '../src/materialize.js'.
 export type { ProjectContext } from './materialize/_shared.js';
@@ -29,8 +29,11 @@ import { writeE2e } from './materialize/e2e.js';
 import { writeGoApi } from './materialize/go-api.js';
 import { writeGoApiAuthService } from './materialize/go-api-auth.js';
 import { writeGoApiMs } from './materialize/go-api-ms.js';
+import { writeGoApiMsAi } from './materialize/go-api-ms-ai.js';
+import { writeGoAiService } from './materialize/go-ai-service.js';
 import { writeGoContract } from './materialize/go-contract.js';
 import { writeGoContractMs } from './materialize/go-contract-ms.js';
+import { writeGoContractMsAi } from './materialize/go-contract-ms-ai.js';
 import { writeNextWeb } from './materialize/web-next.js';
 
 export class UnimplementedCompositionError extends Error {
@@ -49,7 +52,9 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   if (!isImplemented(composition)) {
     throw new UnimplementedCompositionError(composition);
   }
-  if (isGoMicroservicesNext(composition)) {
+  if (isGoMicroservicesNextAi(composition)) {
+    await writeGoMicroservicesNextAi(ctx, composition);
+  } else if (isGoMicroservicesNext(composition)) {
     await writeGoMicroservicesNext(ctx, composition);
   } else if (isGoMonolithNext(composition)) {
     await writeGoMonolithBase(ctx, composition);
@@ -58,6 +63,22 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   } else {
     await writeTsMonolithVite(ctx, composition);
   }
+}
+
+async function writeGoMicroservicesNextAi(ctx: ProjectContext, composition: Composition): Promise<void> {
+  // Shape 4 + AI on (issue #16): everything shape 4 ships, plus the
+  // Python/FastAPI AI service (decision 5) exposed over its own
+  // contract surface (openapi.ai.yaml + the generated Go client in
+  // packages/contract) and consumed by apps/api through that client.
+  await writeRoot(ctx, composition);
+  await writeGoApiMs(ctx);
+  await writeGoApiMsAi(ctx);
+  await writeGoApiAuthService(ctx);
+  await writeGoContractMs(ctx);
+  await writeGoContractMsAi(ctx);
+  await writeGoAiService(ctx);
+  await writeNextWeb(ctx, composition);
+  await writeE2e(ctx, composition);
 }
 
 async function writeGoMicroservicesNext(ctx: ProjectContext, composition: Composition): Promise<void> {

@@ -32,7 +32,7 @@ export interface RunCliOptions {
 export type PromptFn = typeof defaultPrompt;
 
 export type CliResult =
-  | { ok: true; composition: Composition; targetDir: string; dryRun: boolean }
+  | { ok: true; composition: Composition; targetDir: string; dryRun: boolean; warnings: string[] }
   | { ok: false; reason: 'usage' | 'cancel' | 'unimplemented' | 'error'; message: string; exitCode: number };
 
 export const VERSION = '0.1.0';
@@ -68,8 +68,10 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
   }
 
   if (options.dryRun || args.dryRun) {
+    const warnings = compositionWarnings(composition);
+    for (const w of warnings) p.log.warn(w);
     p.outro(`(dry run) would materialize ${describeComposition(composition)} to ${targetDir}`);
-    return { ok: true, composition, targetDir, dryRun: true };
+    return { ok: true, composition, targetDir, dryRun: true, warnings };
   }
 
   if (args.yes) {
@@ -80,11 +82,34 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
   await materialize({ targetDir, name: args.target }, composition);
 
+  const warnings = compositionWarnings(composition);
+  for (const w of warnings) p.log.warn(w);
+
   p.outro(`Done! Next steps:
   cd ${args.target}
   pnpm install
   task dev`);
-  return { ok: true, composition, targetDir, dryRun: false };
+  return { ok: true, composition, targetDir, dryRun: false, warnings };
+}
+
+// compositionWarnings returns the documented scaffold-time warnings for
+// a composition. Per decision 24, unblessed combinations — anything
+// outside the CI-tested 2×2 envelope (decision 7) — get a documented
+// "untested" warning at scaffold time. Today the only materializable
+// unblessed combination is shape 4 with AI on: AI is generatable but
+// NOT CI-tested (decision 29 — the blessed matrix tests web + mobile,
+// never AI).
+function compositionWarnings(c: Composition): string[] {
+  if (c.ai === 'on') {
+    return [
+      `AI-on compositions are generatable but NOT CI-tested (decisions 24/29): ` +
+        `the AI service ships composable primitives (chat completion with streaming, ` +
+        `embeddings, a VectorStore interface, tool/function calling) with no example ` +
+        `composition — composing them into a product is your job. The blessed CI matrix ` +
+        `(web + mobile, decision 29) does not include AI.`,
+    ];
+  }
+  return [];
 }
 
 // ---------- argument parsing ----------------------------------------------
@@ -131,6 +156,9 @@ For this ticket the implemented compositions are:
   - go-monolith + next + no-mobile + no-AI (shape 3)
   - go-microservices + next + no-mobile + no-AI (shape 4: example
     split + JWKS verify)
+  - go-microservices + next + no-mobile + AI (shape 4: Python/FastAPI
+    AI service — generatable but NOT CI-tested, decision 24/29; a
+    warning is emitted at scaffold time)
 All other combinations produce a friendly error.
 `;
 }

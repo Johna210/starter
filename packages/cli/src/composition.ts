@@ -60,7 +60,7 @@ export const GO_MONOLITH_NEXT: Composition = {
 };
 
 /**
- * Shape 4: Go-microservices + Next (issue #15).
+ * Shape 4: Go-microservices + Next, AI off (issue #15).
  *
  * The example split (decision 10) on the capability axis (auth/IAM):
  * apps/api-auth is a separate Go deployable — the sole minter of JWTs
@@ -77,9 +77,39 @@ export const GO_MICROSERVICES_NEXT: Composition = {
   ai: 'off',
 };
 
+/**
+ * Shape 4 + AI on (issue #16): the Go-microservices composition with
+ * the Python/FastAPI AI service (decision 5 — the one shape where AI
+ * is Python, justified by Python's AI ecosystem advantage once the
+ * build is already polyglot). apps/ai exposes the composable
+ * primitives (decision 20) over its own contract surface
+ * (packages/contract/openapi.ai.yaml, Python-generated); apps/api
+ * calls it through the generated Go client — never raw HTTP. This is
+ * an UNBLESSED combination (decision 24/29): generatable, but AI is
+ * not in the CI-tested matrix — the CLI emits a documented warning.
+ */
+export const GO_MICROSERVICES_NEXT_AI: Composition = {
+  backend: 'go',
+  topology: 'microservices',
+  web: 'next',
+  mobile: 'none',
+  ai: 'on',
+};
+
 /** Returns true iff the CLI can actually materialize this composition. */
 export function isImplemented(c: Composition): boolean {
-  return isTsMonolithVite(c) || isTsMicroservicesVite(c) || isGoMonolithNext(c) || isGoMicroservicesNext(c);
+  return (
+    isTsMonolithVite(c) ||
+    isTsMicroservicesVite(c) ||
+    isGoMonolithNext(c) ||
+    isGoMicroservicesNext(c) ||
+    isGoMicroservicesNextAi(c)
+  );
+}
+
+/** True iff this is the shape-4 Go-microservices topology (either AI axis). */
+export function isGoMicroservicesShape(c: Composition): boolean {
+  return c.backend === 'go' && c.topology === 'microservices' && c.web === 'next' && c.mobile === 'none';
 }
 
 export function isTsMonolithVite(c: Composition): boolean {
@@ -119,6 +149,16 @@ export function isGoMicroservicesNext(c: Composition): boolean {
     c.web === GO_MICROSERVICES_NEXT.web &&
     c.mobile === GO_MICROSERVICES_NEXT.mobile &&
     c.ai === GO_MICROSERVICES_NEXT.ai
+  );
+}
+
+export function isGoMicroservicesNextAi(c: Composition): boolean {
+  return (
+    c.backend === GO_MICROSERVICES_NEXT_AI.backend &&
+    c.topology === GO_MICROSERVICES_NEXT_AI.topology &&
+    c.web === GO_MICROSERVICES_NEXT_AI.web &&
+    c.mobile === GO_MICROSERVICES_NEXT_AI.mobile &&
+    c.ai === GO_MICROSERVICES_NEXT_AI.ai
   );
 }
 
