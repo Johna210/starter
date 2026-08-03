@@ -275,11 +275,24 @@ class ChatCompletionResponse(BaseModel):
     usage: Usage | None = None
 
 
+class StreamingToolCall(BaseModel):
+    """A partial tool call delta in a streamed chunk (the streaming
+    form of tool/function calling, decision 20)."""
+
+    index: int = Field(..., description="The index of the tool call this delta belongs to.")
+    id: str | None = Field(None, description="The id of the tool call (set on the first delta).")
+    name: str | None = Field(None, description="The tool name (set on the first delta).")
+    arguments: str | None = Field(None, description="The JSON-encoded arguments fragment so far.")
+
+
 class ChatMessageDelta(BaseModel):
     """The incremental message delta of a streamed chunk."""
 
     role: str | None = None
     content: str | None = None
+    tool_calls: list[StreamingToolCall] | None = Field(
+        None, description="Tool call deltas (tool/function calling while streaming)."
+    )
 
 
 class ChatChunkChoice(BaseModel):
@@ -401,6 +414,7 @@ from .models import (
     ChatMessageDelta,
     EmbeddingsRequest,
     EmbeddingsResponse,
+    StreamingToolCall,
     ToolCall,
     Usage,
 )
@@ -532,6 +546,21 @@ class OpenAIProvider(AIProvider):
                             delta=ChatMessageDelta(
                                 role=choice.delta.role,
                                 content=choice.delta.content,
+                                tool_calls=(
+                                    [
+                                        StreamingToolCall(
+                                            index=tool.index,
+                                            id=tool.id,
+                                            name=tool.function.name if tool.function else None,
+                                            arguments=(
+                                                tool.function.arguments if tool.function else None
+                                            ),
+                                        )
+                                        for tool in choice.delta.tool_calls
+                                    ]
+                                    if choice.delta.tool_calls
+                                    else None
+                                ),
                             ),
                             finish_reason=choice.finish_reason,
                         )
@@ -887,6 +916,7 @@ from app.primitives.models import (
     EmbeddingData,
     EmbeddingsRequest,
     EmbeddingsResponse,
+    StreamingToolCall,
     ToolCall,
     Usage,
 )
@@ -929,16 +959,51 @@ class FakeProvider(AIProvider):
         self.requests.append(request)
 
         async def gen() -> AsyncIterator[ChatChunk]:
-            for piece in ["Hello", " from ", "the fake provider!"]:
+            if request.tools:
                 yield ChatChunk(
                     id="chatcmpl_fake_stream",
                     model="fake-model",
                     choices=[
                         ChatChunkChoice(
-                            index=0, delta=ChatMessageDelta(content=piece), finish_reason=None
+                            index=0,
+                            delta=ChatMessageDelta(
+                                tool_calls=[
+                                    StreamingToolCall(
+                                        index=0,
+                                        id="call_fake_stream_1",
+                                        name="search",
+                                        arguments="",
+                                    )
+                                ]
+                            ),
+                            finish_reason=None,
                         )
                     ],
                 )
+                yield ChatChunk(
+                    id="chatcmpl_fake_stream",
+                    model="fake-model",
+                    choices=[
+                        ChatChunkChoice(
+                            index=0,
+                            delta=ChatMessageDelta(
+                                tool_calls=[StreamingToolCall(index=0, arguments='{"query": "x"}')]
+                            ),
+                            finish_reason=None,
+                        )
+                    ],
+                )
+            else:
+                for piece in ["Hello", " from ", "the fake provider!"]:
+                    yield ChatChunk(
+                        id="chatcmpl_fake_stream",
+                        model="fake-model",
+                        choices=[
+                            ChatChunkChoice(
+                                index=0, delta=ChatMessageDelta(content=piece), finish_reason=None
+                            )
+                        ],
+                    )
             yield ChatChunk(
                 id="chatcmpl_fake_stream",
                 model="fake-model",
@@ -1045,6 +1110,45 @@ def test_chat_completion_streams_sse_chunks() -> None:
         'data: {"id":"chatcmpl_fake_stream","model":"fake-model",'
         '"choices":[{"index":0,"delta":{"content":"Hello"}}]}'
     )
+    assert lines[-1] == "data: [DONE]"
+
+
+def test_streaming_chat_completion_carries_tool_call_deltas() -> None:
+    fake = FakeProvider()
+    app.dependency_overrides[get_provider] = lambda: fake
+    try:
+        response = client.post(
+            "/ai/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "search"}],
+                "stream": True,
+                "tools": [
+                    {
+                        "name": "search",
+                        "description": "Search the docs",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                        },
+                    }
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    lines = [line for line in response.text.split("\\n") if line.startswith("data: ")]
+    # The first delta names the tool; the second accumulates arguments;
+    # the streaming form of tool/function calling (decision 20) is not
+    # lossy (parse each SSE chunk as JSON to compare payloads).
+    first = json.loads(lines[0][len("data: ") :])
+    tool = first["choices"][0]["delta"]["tool_calls"][0]
+    assert tool["id"] == "call_fake_stream_1"
+    assert tool["name"] == "search"
+    second = json.loads(lines[1][len("data: ") :])
+    assert second["choices"][0]["delta"]["tool_calls"][0]["arguments"] == '{"query": "x"}'
     assert lines[-1] == "data: [DONE]"
 
 

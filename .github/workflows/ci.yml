@@ -76,7 +76,11 @@ jobs:
           # steps skip when matrix.ai is true).
           - shape: go-microservices-ai
             backend: go
-            ai: true
+            # String, not YAML boolean: the step guards compare
+            # matrix.ai == 'true' — GitHub's loose equality coerces
+            # 'true' -> true, but a YAML boolean would depend on
+            # runtime type coercion. A string is unambiguous.
+            ai: 'true'
 
     services:
       postgres:

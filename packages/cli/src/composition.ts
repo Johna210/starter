@@ -107,10 +107,6 @@ export function isImplemented(c: Composition): boolean {
   );
 }
 
-/** True iff this is the shape-4 Go-microservices topology (either AI axis). */
-export function isGoMicroservicesShape(c: Composition): boolean {
-  return c.backend === 'go' && c.topology === 'microservices' && c.web === 'next' && c.mobile === 'none';
-}
 
 export function isTsMonolithVite(c: Composition): boolean {
   return (
