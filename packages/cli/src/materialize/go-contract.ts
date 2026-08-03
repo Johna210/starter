@@ -613,12 +613,18 @@ function isAuthenticated(op) {
 }
 
 function operationName(method, path) {
-  const [, seg, rest] = path.split('/');
-  if (!rest) {
+  const [, seg, ...rest] = path.split('/');
+  if (rest.length === 0) {
     // The group root: /items (GET list, POST create).
     return method === 'get' ? 'list' : 'create';
   }
-  return rest;
+  // Nested paths (shape 4 + AI, issue #16): '/ai/vector-store/upsert'
+  // -> 'vectorStoreUpsert' (CamelCase each segment, drop separators,
+  // lowercase-first for the JS method name).
+  const name = rest
+    .map((s) => s.split(/[^a-zA-Z0-9]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(''))
+    .join('');
+  return name.charAt(0).toLowerCase() + name.slice(1);
 }
 
 function generateClient(paths, schemas) {
@@ -694,12 +700,13 @@ function generateClient(paths, schemas) {
   lines.push(\`  return {\`, '');
 
   // Group operations by the first path segment ('/auth/register' ->
-  // auth.register; '/items' -> items.list / items.create).
+  // auth.register; '/items' -> items.list / items.create; the AI
+  // routes -> ai.chatCompletions / ai.vectorStoreUpsert, issue #16).
   const groups = new Map();
   for (const { path, method, reqT, resT, auth } of ops) {
-    const [, seg, rest] = path.split('/');
+    const [, seg] = path.split('/');
     const group = seg ?? 'root';
-    const name = rest ? rest : operationName(method, path);
+    const name = operationName(method, path);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push({ name, method, path, reqT, resT, auth });
   }
