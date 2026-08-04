@@ -1093,6 +1093,7 @@ describe('materialize', () => {
       expect(pkg.dependencies.expo).toEqual(expect.any(String));
       expect(pkg.dependencies['expo-secure-store']).toEqual(expect.any(String));
       expect(pkg.dependencies['@starter/api-client']).toBe('workspace:*');
+      expect(pkg.type).toBe('module');
       expect(pkg.main).toBe('index.ts');
     });
 

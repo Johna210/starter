@@ -1441,18 +1441,25 @@ depends on the web's httpOnly cookie.
     : '';
   const mobileTaskRows = isMobileOn
     ? `| \x60task dev:mobile\x60 | Boot the Expo peer app and print its QR code |
- | \x60task test:mobile\x60 | Run the mobile auth smoke test (live API leg in CI) |
+| \x60task test:mobile\x60 | Run the mobile auth smoke test (live API leg in CI) |
 `
     : '';
   const mobileTestNote = isMobileOn
     ? `
 
- The mobile smoke test (\x60apps/mobile/src/lib/auth-flow.test.ts\x60) runs the typed
- client against a live API when \x60MOBILE_SMOKE_API_URL\x60 is set. CI boots the
+The mobile smoke test (\x60apps/mobile/src/lib/auth-flow.test.ts\x60) runs the typed
+client against a live API when \x60MOBILE_SMOKE_API_URL\x60 is set. CI boots the
 API with a one-second access-token TTL so the test proves Bearer attachment,
 body refresh, secure-storage rotation, and retry without an emulator.
 `
     : '';
+  const mobileBootNote = isMicroservices
+    ? isMobileOn
+      ? '\n\n`task dev` boots four processes in parallel: `apps/web` (port 5173), `apps/api` (port 3000), `apps/api-auth` (port 3001), and `apps/mobile` (Expo). Vite routes `/api/auth/*` to api-auth and `/api/*` to api; the browser sees one same-origin API.'
+      : '\n\n`task dev` boots three processes in parallel: `apps/web` (port 5173), `apps/api` (port 3000), and `apps/api-auth` (port 3001). Vite routes `/api/auth/*` to api-auth and `/api/*` to api; the browser sees one same-origin API.'
+    : isMobileOn
+      ? '\n\n`task dev` boots three processes in parallel: `apps/web`, `apps/api`, and `apps/mobile` (Expo).'
+      : '\n\n`task dev` boots two processes in parallel: `apps/web` and `apps/api`.';
 
   if (isMicroservices) {
     return `# ${name}
@@ -1485,11 +1492,7 @@ task migrate
 task dev
 \`\`\`
 
-\`task dev\` boots three processes in parallel: \`apps/web\` (port 5173),
-\`apps/api\` (port 3000, main API with /items), and \`apps/api-auth\`
-(port 3001, sole minter with /auth/*). Vite's dev proxy routes
-\`/api/auth/*\` to api-auth and \`/api/*\` to api — the browser sees one
-/api endpoint, the httpOnly refresh cookie is first-party.
+${mobileBootNote}
 ${mobileQuickstart}
 
 Open http://localhost:5173, click **Sign in**, register an account,
@@ -1609,10 +1612,10 @@ don't refactor:
 
 | Task | What it does |
 |------|--------------|
- | \`task dev\` | Boot web + api + api-auth in parallel |
- | \`task dev:api-auth\` | Boot just the auth service (sole minter) |
+| \`task dev\` | Boot web + api + api-auth${isMobileOn ? ' + Expo mobile' : ''} in parallel |
+| \`task dev:api-auth\` | Boot just the auth service (sole minter) |
 ${mobileTaskRows}
- | \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
+| \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
 | \`task migrate\` | Apply pending DB migrations |
@@ -1663,6 +1666,7 @@ http://localhost:3000. Vite proxies \`/api\` to the api, so the web
 talks to the api over a same-origin path (the httpOnly refresh cookie
 is always first-party). Try it: open http://localhost:5173, click
 **Sign in**, register an account, and you land on the items page.
+${mobileBootNote}
 ${mobileQuickstart}
 
 - \`GET /items\` returns the list (${apiLabel} route → \`requireAuth\` → \`ItemsRepo.list()\` → Drizzle → Postgres).
@@ -1773,9 +1777,9 @@ don't refactor:
 
 | Task | What it does |
 |------|--------------|
- | \`task dev\` | Boot web + api in parallel |
+| \`task dev\` | Boot web + api${isMobileOn ? ' + Expo mobile' : ''} in parallel |
 ${mobileTaskRows}
- | \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
+| \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
 ${isAiOn ? `| \`task test:ai\` | Run packages/ai's unit tests (the composable primitives; NOT CI-tested — decisions 24/29) |

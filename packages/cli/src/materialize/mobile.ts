@@ -35,6 +35,7 @@ function mobilePackageJson(): string {
       name: '@starter/mobile',
       version: '0.1.0',
       private: true,
+      type: 'module',
       main: 'index.ts',
       scripts: {
         start: 'expo start',
@@ -168,14 +169,7 @@ const styles = StyleSheet.create({
 function mobileAuthTs(isMicroservices: boolean): string {
   const authClient = isMicroservices ? 'apiAuthClient' : 'apiClient';
   return `import { ${authClient} } from './lib/api';
-import {
-  tokenStorage,
-} from './lib/token-storage';
-
-type TokenPair = {
-  access?: string;
-  refresh?: string;
-};
+import { tokenStorage } from './lib/token-storage';
 
 export async function restoreSession(): Promise<string | null> {
   const [access, refresh] = await Promise.all([
@@ -193,7 +187,7 @@ export async function signIn(input: { email: string; password: string }): Promis
     throw new Error('Invalid email or password');
   }
 
-  const data = (await response.json()) as TokenPair;
+  const data = await response.json();
   if (!data.access || !data.refresh) {
     throw new Error('Login response did not include both tokens');
   }
@@ -304,7 +298,7 @@ async function refreshAccessToken(): Promise<string | null> {
   const response = await refreshClient.auth.refresh.$post({ json: { refresh } });
   if (!response.ok) return null;
 
-  const data = (await response.json()) as { access?: string; refresh?: string };
+  const data = await response.json();
   if (!data.access || !data.refresh) return null;
   await tokenStorage.setTokens(data.access, data.refresh);
   return data.access;
@@ -416,7 +410,6 @@ const styles = StyleSheet.create({
 function mobileItemsScreenTs(): string {
   return `import { useCallback, useEffect, useState } from 'react';
 import { Button, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
-import { signOut } from '../auth';
 import { apiClient } from '../lib/api';
 
 async function fetchItems() {
@@ -465,8 +458,7 @@ export function ItemsScreen({ onSignedOut }: { onSignedOut: () => void }) {
     await loadItems();
   };
 
-  const handleSignOut = async () => {
-    await signOut();
+  const handleSignOut = () => {
     onSignedOut();
   };
 
