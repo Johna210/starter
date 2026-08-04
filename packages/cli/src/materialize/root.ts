@@ -664,8 +664,10 @@ tasks:
     dir: packages/shared
     cmds:
       - pnpm build
-`;
+`; 
   }
+
+  const isAiOn = composition.ai === 'on';
 
   return `# Taskfile.yml — scaffolded orchestrator.
 #
@@ -705,7 +707,7 @@ tasks:
       - task: test:auth
       - task: test:shared
       - task: test:db
-      - task: test:e2e
+${isAiOn ? '      - task: test:ai\n' : ''}      - task: test:e2e
 
   test:web:
     dir: apps/web
@@ -733,8 +735,12 @@ tasks:
     dir: packages/db
     cmds:
       - pnpm test
-
-  test:e2e:
+${isAiOn ? `  test:ai:
+    desc: "Run packages/ai unit tests (composable primitives, decision 20) — the FakeProvider suite; the pgvector store repo test skips without DATABASE_URL."
+    dir: packages/ai
+    cmds:
+      - pnpm test
+` : ''}  test:e2e:
     desc: Run the one E2E (items flow). Requires DATABASE_URL + task migrate.
     cmds:
       - pnpm test:e2e
@@ -789,6 +795,7 @@ coverage/
 }
 
 function rootReadme(name: string, composition: Composition): string {
+  const isAiOn = composition.ai === 'on';
   if (composition.backend === 'go' && composition.topology === 'microservices') {
 
     const isAi = composition.ai === 'on';
@@ -1624,7 +1631,14 @@ The scaffold ships honest seams — each is a documented extension point:
   Behind \`requireAuth\` if it needs an authenticated principal.
 - **Wire a fence from the auth shim** (email-verify, password reset,
   MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
-- **Add a web page**: create a route in \`apps/web/src/pages/\` and
+${isAiOn ? `- **Wire in the AI primitives** (issue #17, decision 20): \`packages/ai\`
+  ships chat completion (with streaming), embeddings, a \`VectorStore\`
+  interface (pgvector default over the db's \`embeddings\` table), and
+  tool/function calling — composing them into a product is your job
+  (no example composition ships, decision 20). Set \`OPENAI_API_KEY\`
+  in \`packages/ai/.env\` (copy \`packages/ai/.env.example\`); see
+  \`docs/wire-it-in/ai.md\`.
+` : ''}- **Add a web page**: create a route in \`apps/web/src/pages/\` and
   register it in \`apps/web/src/router.tsx\`; reach the api through
   \`apiClient\` (re-exported from \`apps/web/src/lib/api\`).
 
@@ -1643,8 +1657,10 @@ don't refactor:
   the same \`api-client\` — the contract is invariant, only the
   rendering shell changes.
 - **Add an AI layer** (decisions 20, 21): AI is opt-in. Scaffold with
-  \`ai: on\` to get \`packages/ai\` with composable primitives (chat,
-  embeddings, tool calling). See \`docs/wire-it-in/\` when AI is on.
+  \`ai: on\` to get \`packages/ai\` — a library of composable AI
+  primitives (chat with streaming, embeddings, a \`VectorStore\`,
+  tool calling), NOT CI-tested (decisions 24/29: generatable, not
+  blessed). See \`docs/wire-it-in/\` when AI is on.
 - **Record your decisions** (decision 30): use \`docs/adr/\` to record
   architectural decisions. Each ADR is a short document — see the
   convention in [\`docs/adr/README.md\`](docs/adr/README.md).
@@ -1657,7 +1673,8 @@ don't refactor:
 | \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
-| \`task migrate\` | Apply pending DB migrations |
+${isAiOn ? `| \`task test:ai\` | Run packages/ai's unit tests (the composable primitives; NOT CI-tested — decisions 24/29) |
+` : ''}| \`task migrate\` | Apply pending DB migrations |
 | \`task db:generate\` | Generate a new migration from the Drizzle schema |
 | \`task build\` | Build all workspaces |
 

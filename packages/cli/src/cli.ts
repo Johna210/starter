@@ -95,15 +95,16 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 // compositionWarnings returns the documented scaffold-time warnings for
 // a composition. Per decision 24, unblessed combinations — anything
 // outside the CI-tested 2×2 envelope (decision 7) — get a documented
-// "untested" warning at scaffold time. Today the only materializable
-// unblessed combination is shape 4 with AI on: AI is generatable but
-// NOT CI-tested (decision 29 — the blessed matrix tests web + mobile,
-// never AI).
+// "untested" warning at scaffold time. Today the unblessed
+// combinations are the AI-on shapes (shape 1 + AI via packages/ai,
+// issue #17, and shape 4 + AI via the apps/ai service): AI is
+// generatable but NOT CI-tested (decision 29 — the blessed matrix
+// tests web + mobile, never AI).
 function compositionWarnings(c: Composition): string[] {
   if (c.ai === 'on') {
     return [
       `AI-on compositions are generatable but NOT CI-tested (decisions 24/29): ` +
-        `the AI service ships composable primitives (chat completion with streaming, ` +
+        `the scaffold ships composable AI primitives (chat completion with streaming, ` +
         `embeddings, a VectorStore interface, tool/function calling) with no example ` +
         `composition — composing them into a product is your job. The blessed CI matrix ` +
         `(web + mobile, decision 29) does not include AI.`,
@@ -152,6 +153,9 @@ Prompts (in order):
 
 For this ticket the implemented compositions are:
   - ts-monolith + vite + no-mobile + no-AI (shape 1)
+  - ts-monolith + vite + no-mobile + AI (shape 1: packages/ai — the
+    composable AI primitives, issue #17; generatable but NOT
+    CI-tested, decision 24/29; a warning is emitted at scaffold time)
   - ts-microservices + vite + no-mobile + no-AI (shape 2)
   - go-monolith + next + no-mobile + no-AI (shape 3)
   - go-microservices + next + no-mobile + no-AI (shape 4: example
