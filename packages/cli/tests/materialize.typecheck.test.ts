@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { GO_MICROSERVICES_NEXT, GO_MICROSERVICES_NEXT_AI, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
+import { GO_MICROSERVICES_NEXT, GO_MICROSERVICES_NEXT_AI, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MONOLITH_VITE_AI, TS_MICROSERVICES_VITE } from '../src/composition.js';
 import { materialize } from '../src/materialize.js';
 
 const exec = promisify(execFile);
@@ -45,6 +45,35 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
       // 3. Typecheck each workspace
       for (const ws of [
         'packages/db',
+        'packages/api-client',
+        'apps/api',
+        'apps/web',
+      ]) {
+        const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
+          cwd: join(targetDir, ws),
+        });
+        expect(stdout + stderr, `tsc failed in ${ws}`).not.toMatch(/error TS/);
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'the materialized TS-monolith + AI project typechecks end-to-end (issue #17)',
+    async () => {
+      // 1. Materialize (shape 1 + AI on: packages/ai + the db's
+      // embeddings schema land in the scaffold).
+      await materialize({ targetDir, name: 'e2e-app' }, TS_MONOLITH_VITE_AI);
+
+      // 2. Install
+      await exec('pnpm', ['install', '--prefer-offline'], { cwd: targetDir });
+
+      // 3. Typecheck each workspace — packages/ai is the new surface
+      // (openai SDK + zod config + the drizzle pgvector store), and
+      // packages/db now carries the embeddings schema.
+      for (const ws of [
+        'packages/db',
+        'packages/ai',
         'packages/api-client',
         'apps/api',
         'apps/web',

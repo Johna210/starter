@@ -10,14 +10,25 @@
 import { join } from 'node:path';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
-export async function writeDb(ctx: ProjectContext): Promise<void> {
+export interface WriteDbOptions {
+  /**
+   * When true (AI-on compositions, issue #17), packages/db also ships
+   * the embeddings schema + the 0003_embeddings pgvector migration —
+   * the default VectorStore's table (decision 14 reuse). Off shapes
+   * carry zero AI surface (decision 21).
+   */
+  aiOn?: boolean;
+}
+
+export async function writeDb(ctx: ProjectContext, opts: WriteDbOptions = {}): Promise<void> {
   const { targetDir } = ctx;
+  const { aiOn = false } = opts;
 
   await writeFileRecursive(join(targetDir, 'packages/db/package.json'), dbPackageJson());
   await writeFileRecursive(join(targetDir, 'packages/db/tsconfig.json'), dbTsconfigJson());
   await writeFileRecursive(join(targetDir, 'packages/db/.env.example'), dbEnvExample());
   await writeFileRecursive(join(targetDir, 'packages/db/drizzle.config.ts'), dbDrizzleConfig());
-  await writeFileRecursive(join(targetDir, 'packages/db/src/index.ts'), dbIndexTs());
+  await writeFileRecursive(join(targetDir, 'packages/db/src/index.ts'), dbIndexTs(aiOn));
   await writeFileRecursive(join(targetDir, 'packages/db/src/config.ts'), dbConfigTs());
   await writeFileRecursive(join(targetDir, 'packages/db/src/client.ts'), dbClientTs());
   await writeFileRecursive(join(targetDir, 'packages/db/src/schema/items.ts'), dbSchemaItemsTs());
@@ -32,6 +43,16 @@ export async function writeDb(ctx: ProjectContext): Promise<void> {
     join(targetDir, 'packages/db/migrations/0002_refresh_tokens.sql'),
     dbMigration0002(),
   );
+  if (aiOn) {
+    await writeFileRecursive(
+      join(targetDir, 'packages/db/src/schema/embeddings.ts'),
+      dbSchemaEmbeddingsTs(),
+    );
+    await writeFileRecursive(
+      join(targetDir, 'packages/db/migrations/0003_embeddings.sql'),
+      dbMigration0003(),
+    );
+  }
   // Drizzle's CLI migrator (`drizzle-kit migrate`, which the root
   // Taskfile's `task migrate` invokes) requires meta/_journal.json
   // listing the migrations in order. The hand-authored SQL files
@@ -40,7 +61,7 @@ export async function writeDb(ctx: ProjectContext): Promise<void> {
   // (issue 09 surfaced this when the E2E couldn't bootstrap its DB).
   await writeFileRecursive(
     join(targetDir, 'packages/db/migrations/meta/_journal.json'),
-    dbMigrationJournal(),
+    dbMigrationJournal(aiOn),
   );
 }
 
@@ -121,8 +142,8 @@ export default defineConfig({
 `;
 }
 
-function dbIndexTs(): string {
-  return `// @starter/db — Drizzle client + schema barrel.
+function dbIndexTs(aiOn: boolean): string {
+  const shared = `// @starter/db — Drizzle client + schema barrel.
 //
 // The Drizzle TS schema is the single source of truth (decision 14):
 //   drizzle-kit generate -> emits a versioned SQL migration into ./migrations/
@@ -145,6 +166,11 @@ export { itemsTable, type Item, type NewItem } from './schema/items.js';
 export { usersTable, type User, type NewUser } from './schema/users.js';
 export { refreshTokensTable, type RefreshTokenRow, type NewRefreshTokenRow } from './schema/refresh-tokens.js';
 `;
+  // AI-on compositions (issue #17) also ship the embeddings schema —
+  // the pgvector table the PgVectorStore default upserts into.
+  const embeddingsExport = `export { embeddingsTable, type EmbeddingRow, type NewEmbeddingRow } from './schema/embeddings.js';
+`;
+  return aiOn ? shared + embeddingsExport : shared;
 }
 
 function dbConfigTs(): string {
@@ -359,6 +385,48 @@ END $$;
 `;
 }
 
+function dbSchemaEmbeddingsTs(): string {
+  return `// @starter/db — embeddings schema (AI primitives, decision 20/14).
+//
+// The default VectorStore's table: the PgVectorStore in packages/ai
+// upserts into and searches this table. The vector column has a fixed
+// dimension (1536 — the default embeddings model text-embedding-3-small's
+// output size); switching to a model with a different dimension means a
+// new column/migration (a documented seam, not something the store hides).
+//
+// Requires the pgvector extension (\`CREATE EXTENSION vector\`) — the
+// 0003_embeddings migration creates it if the Postgres instance has
+// pgvector installed (see packages/ai/.env.example / the README).
+
+import { jsonb, pgTable, text, timestamp, vector } from 'drizzle-orm/pg-core';
+
+export const embeddingsTable = pgTable('embeddings', {
+  id: text().primaryKey(),
+  vector: vector({ dimensions: 1536 }).notNull(),
+  metadata: jsonb(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type EmbeddingRow = typeof embeddingsTable.$inferSelect;
+export type NewEmbeddingRow = typeof embeddingsTable.$inferInsert;
+`;
+
+}
+
+function dbMigration0003(): string {
+  return `CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS "embeddings" (
+  "id" text PRIMARY KEY NOT NULL,
+  "vector" vector(1536) NOT NULL,
+  "metadata" jsonb,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+-- Cosine-similarity index (matches PgVectorStore's \`1 - (a <=> b)\` search).
+CREATE INDEX IF NOT EXISTS "embeddings_vector_idx" ON "embeddings" USING hnsw ("vector" vector_cosine_ops);
+`;
+}
+
 /**
  * Drizzle's CLI migrator requires `meta/_journal.json` listing the
  * migrations in order (drizzle-orm/migrator.js: readMigrationFiles).
@@ -368,16 +436,20 @@ END $$;
  * for the current versions of drizzle-orm / drizzle-kit; bump
  * together if the scaffolded version is ever upgraded.
  */
-function dbMigrationJournal(): string {
+function dbMigrationJournal(aiOn: boolean): string {
+  const entries = [
+    { idx: 0, version: '7', when: 1730000000000, tag: '0000_items', breakpoints: true },
+    { idx: 1, version: '7', when: 1730000001000, tag: '0001_users', breakpoints: true },
+    { idx: 2, version: '7', when: 1730000002000, tag: '0002_refresh_tokens', breakpoints: true },
+  ];
+  if (aiOn) {
+    entries.push({ idx: 3, version: '7', when: 1730000003000, tag: '0003_embeddings', breakpoints: true });
+  }
   return JSON.stringify(
     {
       version: '7',
       dialect: 'postgresql',
-      entries: [
-        { idx: 0, version: '7', when: 1730000000000, tag: '0000_items', breakpoints: true },
-        { idx: 1, version: '7', when: 1730000001000, tag: '0001_users', breakpoints: true },
-        { idx: 2, version: '7', when: 1730000002000, tag: '0002_refresh_tokens', breakpoints: true },
-      ],
+      entries,
     },
     null,
     2,

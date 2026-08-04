@@ -138,30 +138,52 @@ the shim is honest, the rest is a deliberate handoff.
 function wireItInAiMd(): string {
   return `# Wire it in: AI
 
-The AI fence (decision 13) is **on** for this composition. The scaffold
-provides a documented stub — a single \`packages/ai\` workspace with a
-shim that returns a hard-coded response. The seam is real; replacing the
-stub with a real provider is a deliberate handoff.
+The AI fence is **on** for this composition (issue #17): \`packages/ai\`
+ships the composable AI primitives of decision 20 — chat completion
+(with streaming), embeddings, a \`VectorStore\` interface (pgvector
+default over the db's \`embeddings\` table, decision 14 reuse), and
+tool/function calling. Each primitive is a real typed layer over the
+\`openai\` SDK, not a stub. **No example composition is shipped**
+(decision 20): these are the building blocks — composing them into a
+product (RAG, recommendation, agentic) is your job.
 
 ## What the scaffold ships
 
-\`packages/ai/\` contains:
+\`packages/ai/src/\`:
 
-- \`src/index.ts\` — exports \`ai.generateText(...)\` (a thin wrapper)
-- \`src/provider.ts\` — the stub provider (hard-coded response)
+- \`chat.ts\` — \`chatComplete(messages, opts)\`; \`opts.stream: true\`
+  returns an \`AsyncIterable\` of \`ChatChunk\` (SSE-style deltas)
+- \`embeddings.ts\` — \`embed(texts)\` returns vectors for retrieval
+- \`vector-store.ts\` — the \`VectorStore\` interface, a pure
+  \`cosineSimilarity\`, and \`PgVectorStore\` (upserts into the db's
+  \`embeddings\` table, cosine search via \`<=>\`)
+- \`tool-call.ts\` — \`toolCall(tools, message)\` + \`ToolRegistry\`
+  (register a tool, let the model call it, run it)
+- \`config.ts\` — zod-validated \`readAiConfig()\` (decision 28):
+  \`OPENAI_API_KEY\`, \`OPENAI_BASE_URL\`, \`OPENAI_MODEL\` (default
+  \`gpt-4o-mini\`), \`OPENAI_EMBEDDINGS_MODEL\` (default
+  \`text-embedding-3-small\`)
+- \`fakes.ts\` — \`FakeProvider\`, the seam the unit tests exercise
+  (decision 29: a mocked-LLM round-trip is a unit test, not CI)
 
-The stub is **honest**: it does exactly what it says — returns a hard-coded
-response. No hidden behavior, no mock that pretends to be real.
+Unit tests ship for each primitive (decision 22) and run via
+\`task test:ai\`. The workspace is **NOT CI-tested** (decisions 24/29:
+generatable, not blessed) — run them locally.
 
-## How to replace
+## How to wire it in
 
-1. Pick a provider (OpenAI, Anthropic, local model, etc.)
-2. Replace the stub in \`src/provider.ts\` with real API calls
-3. Keep the same \`generateText\` interface — the callers don't change
-4. Add your API key to \`.env.local\` (gitignored, not committed)
+1. Set \`OPENAI_API_KEY\` in \`packages/ai/.env\` (copy
+   \`packages/ai/.env.example\`); optional: \`OPENAI_BASE_URL\` (any
+   OpenAI-compatible endpoint), \`OPENAI_MODEL\` /
+   \`OPENAI_EMBEDDINGS_MODEL\` / \`OPENAI_TIMEOUT_SECONDS\`.
+2. \`task migrate\` — the 0003_embeddings migration (installed with the
+   AI-on scaffold) creates the \`embeddings\` table + pgvector index.
+3. Call the primitives where your product needs them — e.g. embed your
+   rows into \`PgVectorStore\` on write, \`search()\` on read; or hand
+   \`toolCall()\` your app's functions and let the model dispatch.
 
-The fence is the interface, not the implementation. The starter owns the
-surface; you own the provider.
+The fence is the primitive surface: the starter owns the typed seams
+over the provider; you own the composition.
 `;
 }
 

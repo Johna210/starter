@@ -23,7 +23,6 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  type Composition,
   GO_MICROSERVICES_NEXT,
   GO_MICROSERVICES_NEXT_AI,
   isImplemented,
@@ -53,10 +52,10 @@ describe('Go-microservices + Next + AI on (shape 4 + AI, issue #16)', () => {
 
   it('is a materializable (but UNBLESSED, decision 24/29) composition', () => {
     expect(isImplemented(GO_MICROSERVICES_NEXT_AI)).toBe(true);
-    // AI is not a blessed-combo axis: the TS shapes + ai remain
+    // AI is not a blessed-combo axis: the TS-monolith + AI combination
+    // is also generatable (issue #17), but other shapes + AI remain
     // unimplemented.
-    const c: Composition = { ...TS_MONOLITH_VITE, ai: 'on' };
-    expect(isImplemented(c)).toBe(false);
+    expect(isImplemented({ ...TS_MONOLITH_VITE, ai: 'on' })).toBe(true);
   });
 
   it('writes the AI service with the four composable primitives (decision 20)', async () => {
