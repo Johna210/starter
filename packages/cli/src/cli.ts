@@ -61,8 +61,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
   if (!isImplemented(composition)) {
     const message = `This composition is not yet implemented: ${describeComposition(composition)}.\n` +
-      `The CLI materializer ships one composition in this ticket; the other 23+ are ` +
-      `scheduled for later issues. Please choose another combination.`;
+      `This combination is outside the currently materialized TS, Go, and Expo ` +
+      `shapes. Please choose another combination.`;
     p.cancel(message);
     return { ok: false, reason: 'unimplemented', message, exitCode: 1 };
   }
@@ -153,10 +153,12 @@ Prompts (in order):
 
 For this ticket the implemented compositions are:
   - ts-monolith + vite + no-mobile + no-AI (shape 1)
+  - ts-monolith + vite + Expo mobile + no-AI (shape 1 + Expo, issue #18)
   - ts-monolith + vite + no-mobile + AI (shape 1: packages/ai — the
     composable AI primitives, issue #17; generatable but NOT
     CI-tested, decision 24/29; a warning is emitted at scaffold time)
   - ts-microservices + vite + no-mobile + no-AI (shape 2)
+  - ts-microservices + vite + Expo mobile + no-AI (shape 2 + Expo, issue #18)
   - go-monolith + next + no-mobile + no-AI (shape 3)
   - go-microservices + next + no-mobile + no-AI (shape 4: example
     split + JWKS verify)

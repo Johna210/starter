@@ -13,7 +13,16 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { GO_MICROSERVICES_NEXT, GO_MICROSERVICES_NEXT_AI, GO_MONOLITH_NEXT, TS_MONOLITH_VITE, TS_MONOLITH_VITE_AI, TS_MICROSERVICES_VITE } from '../src/composition.js';
+import {
+  GO_MICROSERVICES_NEXT,
+  GO_MICROSERVICES_NEXT_AI,
+  GO_MONOLITH_NEXT,
+  TS_MICROSERVICES_VITE,
+  TS_MICROSERVICES_VITE_EXPO,
+  TS_MONOLITH_VITE,
+  TS_MONOLITH_VITE_AI,
+  TS_MONOLITH_VITE_EXPO,
+} from '../src/composition.js';
 import { materialize } from '../src/materialize.js';
 
 const exec = promisify(execFile);
@@ -48,6 +57,28 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
         'packages/api-client',
         'apps/api',
         'apps/web',
+      ]) {
+        const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
+          cwd: join(targetDir, ws),
+        });
+        expect(stdout + stderr, `tsc failed in ${ws}`).not.toMatch(/error TS/);
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'the materialized TS-monolith + Expo project typechecks end-to-end (issue #18)',
+    async () => {
+      await materialize({ targetDir, name: 'e2e-app' }, TS_MONOLITH_VITE_EXPO);
+      await exec('pnpm', ['install', '--prefer-offline'], { cwd: targetDir });
+
+      for (const ws of [
+        'packages/db',
+        'packages/api-client',
+        'apps/api',
+        'apps/web',
+        'apps/mobile',
       ]) {
         const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
           cwd: join(targetDir, ws),
@@ -103,6 +134,29 @@ describeIt('materialize + install + typecheck (RUN_TYPE_CHECK=1)', () => {
         'apps/api',
         'apps/api-auth',
         'apps/web',
+      ]) {
+        const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
+          cwd: join(targetDir, ws),
+        });
+        expect(stdout + stderr, `tsc failed in ${ws}`).not.toMatch(/error TS/);
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'the materialized TS-microservices + Expo project typechecks end-to-end (issue #18)',
+    async () => {
+      await materialize({ targetDir, name: 'e2e-app' }, TS_MICROSERVICES_VITE_EXPO);
+      await exec('pnpm', ['install', '--prefer-offline'], { cwd: targetDir });
+
+      for (const ws of [
+        'packages/db',
+        'packages/api-client',
+        'apps/api',
+        'apps/api-auth',
+        'apps/web',
+        'apps/mobile',
       ]) {
         const { stdout, stderr } = await exec('pnpm', ['typecheck'], {
           cwd: join(targetDir, ws),

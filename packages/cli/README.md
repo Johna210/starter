@@ -4,13 +4,19 @@ Scaffold a new fullstack project from the [Starter](../../). The CLI
 composes five prompt axes (backend language, topology, web variant,
 mobile, AI) and writes a runnable monorepo.
 
-> **Status (`0.1.0`):** four compositions are materializable:
+> **Status (`0.1.0`):** eight compositions are materializable:
 >
 > - **TS-monolith + Vite+TanStack + no mobile + no AI** (shape 1)
+> - **TS-monolith + Vite+TanStack + Expo + no AI** (shape 1 + mobile)
+> - **TS-monolith + Vite+TanStack + no mobile + AI** (shape 1 + AI;
+>   generatable but not in the blessed matrix)
 > - **TS-microservices + Vite+TanStack + no mobile + no AI** (shape 2)
+> - **TS-microservices + Vite+TanStack + Expo + no AI** (shape 2 + mobile)
 > - **Go-monolith + Next.js + no mobile + no AI** (shape 3)
 > - **Go-microservices + Next.js + no mobile + no AI** (shape 4: example
 >   split — apps/api-auth as the sole minter, JWKS-verified apps/api)
+> - **Go-microservices + Next.js + no mobile + AI** (shape 4 + AI;
+>   generatable but not in the blessed matrix)
 >
 > All other combinations produce a friendly error. See [Issue
 > tracker](https://github.com/Johna210/starter/issues) for the roadmap.
@@ -48,7 +54,8 @@ npx create-fs-starter --help           # full help
 
 ## What gets scaffolded
 
-For the supported composition:
+For a supported TypeScript composition (the mobile folder is present when
+Expo is selected):
 
 ```
 my-app/
@@ -59,7 +66,8 @@ my-app/
 ├── README.md
 ├── apps/
 │   ├── web/              # Vite + React + TanStack Router + Query shell
-│   └── api/              # Hono on @hono/node-server, GET /health
+│   ├── api/              # Hono on @hono/node-server, GET /health
+│   └── mobile/           # Expo + secure storage (when mobile=expo)
 └── packages/
     └── shared/           # zod schemas + utils (empty for now)
 ```

@@ -8,9 +8,8 @@
 //
 // Per decision 24 the CLI can compose any of the 2x2x... axes
 // ("generatable-anything") but only the 4 blessed combos (decision 7)
-// carry CI guarantees. For issue #3, only the first blessed combo is
-// actually materializable; the other 23+ compositions produce a
-// friendly error and exit non-zero.
+// carry CI guarantees. Materializable compositions are added as tickets
+// land; unsupported combinations produce a friendly error and exit non-zero.
 
 export type Backend = 'ts' | 'go';
 export type Topology = 'monolith' | 'microservices';
@@ -61,6 +60,24 @@ export const TS_MICROSERVICES_VITE: Composition = {
   topology: 'microservices',
   web: 'vite',
   mobile: 'none',
+  ai: 'off',
+};
+
+/** Shape 1 + Expo mobile (issue #18 / ticket 16). */
+export const TS_MONOLITH_VITE_EXPO: Composition = {
+  backend: 'ts',
+  topology: 'monolith',
+  web: 'vite',
+  mobile: 'expo',
+  ai: 'off',
+};
+
+/** Shape 2 + Expo mobile (issue #18 / ticket 16). */
+export const TS_MICROSERVICES_VITE_EXPO: Composition = {
+  backend: 'ts',
+  topology: 'microservices',
+  web: 'vite',
+  mobile: 'expo',
   ai: 'off',
 };
 
@@ -122,6 +139,8 @@ export function isImplemented(c: Composition): boolean {
     isTsMonolithVite(c) ||
     isTsMonolithViteAi(c) ||
     isTsMicroservicesVite(c) ||
+    isTsMonolithViteExpo(c) ||
+    isTsMicroservicesViteExpo(c) ||
     isGoMonolithNext(c) ||
     isGoMicroservicesNext(c) ||
     isGoMicroservicesNextAi(c)
@@ -156,6 +175,26 @@ export function isTsMicroservicesVite(c: Composition): boolean {
     c.web === TS_MICROSERVICES_VITE.web &&
     c.mobile === TS_MICROSERVICES_VITE.mobile &&
     c.ai === TS_MICROSERVICES_VITE.ai
+  );
+}
+
+export function isTsMonolithViteExpo(c: Composition): boolean {
+  return (
+    c.backend === TS_MONOLITH_VITE_EXPO.backend &&
+    c.topology === TS_MONOLITH_VITE_EXPO.topology &&
+    c.web === TS_MONOLITH_VITE_EXPO.web &&
+    c.mobile === TS_MONOLITH_VITE_EXPO.mobile &&
+    c.ai === TS_MONOLITH_VITE_EXPO.ai
+  );
+}
+
+export function isTsMicroservicesViteExpo(c: Composition): boolean {
+  return (
+    c.backend === TS_MICROSERVICES_VITE_EXPO.backend &&
+    c.topology === TS_MICROSERVICES_VITE_EXPO.topology &&
+    c.web === TS_MICROSERVICES_VITE_EXPO.web &&
+    c.mobile === TS_MICROSERVICES_VITE_EXPO.mobile &&
+    c.ai === TS_MICROSERVICES_VITE_EXPO.ai
   );
 }
 

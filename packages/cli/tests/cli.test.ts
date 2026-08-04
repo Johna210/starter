@@ -72,6 +72,23 @@ describe('runCli', () => {
       const pkg = JSON.parse(await readFile(join(targetDir, 'package.json'), 'utf8'));
       expect(pkg.name).toBe('my-app');
     });
+
+    it('materializes the TS + Expo mobile composition when answers are provided', async () => {
+      const result = await runCli(['mobile-app'], {
+        noExit: true,
+        answers: {
+          backend: 'ts',
+          topology: 'monolith',
+          web: 'vite',
+          mobile: 'expo',
+          ai: 'off',
+        },
+      });
+      expect(result.ok).toBe(true);
+      const mobile = join(workDir, 'mobile-app', 'apps/mobile/package.json');
+      const pkg = JSON.parse(await readFile(mobile, 'utf8'));
+      expect(pkg.dependencies['expo-secure-store']).toEqual(expect.any(String));
+    });
   });
 
   describe('unimplemented composition', () => {

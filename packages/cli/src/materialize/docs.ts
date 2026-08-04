@@ -6,11 +6,12 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
   const { targetDir } = ctx;
   const isTs = composition.backend === 'ts';
   const isMicroservices = composition.topology === 'microservices';
+  const isMobileOn = composition.mobile === 'expo';
   const isAiOn = composition.ai === 'on';
 
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/contract-spine.md'),
-    isTs ? contractSpineTsMd(isMicroservices) : contractSpineGoMd(),
+    isTs ? contractSpineTsMd(isMicroservices, isMobileOn) : contractSpineGoMd(),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/modular-monolith.md'),
@@ -18,7 +19,7 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/auth-subtree.md'),
-    authSubtreeMd(isMicroservices),
+    authSubtreeMd(isMicroservices, isMobileOn),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/typed-rpc-transport.md'),
@@ -36,6 +37,12 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
     isTs ? codeStyleTsMd() : codeStyleGoMd());
   await writeFileRecursive(join(targetDir, 'docs/standards/best-practices.md'), bestPracticesMd(isMicroservices));
   await writeFileRecursive(join(targetDir, 'docs/standards/anti-patterns.md'), antiPatternsMd());
+  if (isMobileOn) {
+    await writeFileRecursive(
+      join(targetDir, 'docs/architecture/mobile-auth-flow.md'),
+      mobileAuthFlowMd(isMicroservices),
+    );
+  }
 }
 
 function wireItInAuthMd(): string {
@@ -187,7 +194,16 @@ over the provider; you own the composition.
 `;
 }
 
-function contractSpineTsMd(isMicroservices: boolean): string {
+function contractSpineTsMd(isMicroservices: boolean, isMobileOn = false): string {
+  const mobileDescription = isMobileOn
+    ? '\n\nThe Expo peer app in apps/mobile consumes the same Hono RPC client as the web. It calls the API directly, stores auth tokens through expo-secure-store, and never introduces a second domain-types package.'
+    : '';
+  const mobileDiagramMicroservices = isMobileOn
+    ? '\n    subgraph "apps/mobile (Expo)"\n        MOBILE["login + items screens"]\n        MC["@starter/api-client"]\n    end\n    MOBILE -->|typed call| MC\n    MC -->|HTTP + Bearer| R1\n'
+    : '';
+  const mobileDiagramMonolith = isMobileOn
+    ? '\n    subgraph "apps/mobile (Expo)"\n        MOBILE["login + items screens"]\n        MC["@starter/api-client"]\n    end\n    MOBILE -->|typed call| MC\n    MC -->|HTTP + Bearer| R\n'
+    : '';
   if (isMicroservices) {
     return `# Your Hono RPC contract spine (TS-microservices)
 
@@ -212,6 +228,7 @@ There are **two** services in this shape (decision 10's example split):
 (for \`apps/api\`) and \`createApiAuthClient\` (for \`apps/api-auth\`).
 The vite dev proxy routes \`/api/auth/*\` to the auth service and
 \`/api/*\` to the main api — the browser sees one \`/api\` endpoint.
+${mobileDescription}
 
 ## Diagram
 
@@ -238,6 +255,7 @@ graph LR
         DB["@starter/db<br/>(Drizzle schema)"]
         AUTH["@starter/auth<br/>(argon2 + jose — shared seam)"]
     end
+${mobileDiagramMicroservices}
 
     W -->|typed call| AC
     AC -->|/api/*| R1
@@ -276,6 +294,7 @@ shapes), no codegen, no separate source of truth to drift.
 a typed client via \`hc<typeof app>()\`. A type error in the api is a
 compile error in the web client — the contract is checked at compile time
 (decision 22: type-inference *is* the contract test in TS shapes).
+${mobileDescription}
 
 ## Diagram
 
@@ -296,6 +315,7 @@ graph LR
         DB["@starter/db<br/>(Drizzle schema)"]
         AUTH["@starter/auth<br/>(argon2 + jose)"]
     end
+${mobileDiagramMonolith}
 
     W -->|typed call| AC
     AC -->|HTTP + Bearer| R
@@ -512,7 +532,10 @@ graph LR
 `;
 }
 
-function authSubtreeMd(isMicroservices: boolean): string {
+function authSubtreeMd(isMicroservices: boolean, isMobileOn = false): string {
+  const mobileSection = isMobileOn
+    ? '\n\n## Mobile-auth flow (decision 23)\n\nThe Expo peer app uses platform-native secure storage rather than cookies. Login and register return both tokens in the response body; apps/mobile stores them in expo-secure-store, attaches the access token as a Bearer header, and sends the refresh token in the body of POST /auth/refresh after a 401. The rotated pair replaces both secure-storage entries before the original request is retried.\n'
+    : '';
   if (isMicroservices) {
     return `# The auth subtree (TS-microservices)
 
@@ -547,6 +570,7 @@ key. The web-auth flow (decision 16) is uniform:
 4. On 401, the api-client calls \`POST /auth/refresh\` on the auth
    service (the httpOnly cookie is sent automatically), rotates the
    refresh token, and retries the original request.
+${mobileSection}
 
 ## Diagram
 
@@ -617,6 +641,7 @@ uniform across web variants:
 4. On 401, \`api-client\` calls \`POST /auth/refresh\` (which re-reads the
    httpOnly cookie), rotates the refresh token, and retries the original
    request.
+${mobileSection}
 
 ## Diagram
 
@@ -661,6 +686,55 @@ sequenceDiagram
 signing key. The httpOnly cookie protects the refresh token from XSS; the
 short-lived access token is briefly readable during its lifetime — the
 standard, accepted JWT tradeoff.
+`;
+}
+
+function mobileAuthFlowMd(isMicroservices: boolean): string {
+  const authService = isMicroservices ? 'apps/api-auth' : 'apps/api';
+  const authBase = isMicroservices ? 'EXPO_PUBLIC_AUTH_URL' : 'EXPO_PUBLIC_API_URL';
+  return `# Mobile auth flow (Expo)
+
+The mobile app is a peer client, not a web shell with cookies bolted on.
+It uses the same typed Hono RPC client as apps/web, but its token storage
+and refresh transport follow decision 23:
+
+1. POST /auth/login returns both access and refresh tokens in the body.
+2. apps/mobile stores both values in expo-secure-store.
+3. Every protected request carries Authorization: Bearer <access>.
+4. A 401 reads the refresh token from secure storage and POSTs it to
+   /auth/refresh in a JSON body, never in a cookie.
+5. The rotated pair replaces both secure-storage values and the original
+   request is retried once.
+
+The auth base URL is ${authBase}. In this shape, ${authService} owns the
+four auth endpoints and is the sole token minter. The items API remains the
+typed api-client's other base URL in the microservices shape.
+
+## Sequence
+
+\`\`\`mermaid
+sequenceDiagram
+    participant Mobile as apps/mobile (Expo)
+    participant Store as expo-secure-store
+    participant Auth as ${authService}
+    participant API as apps/api
+
+    Mobile->>Auth: POST /auth/login {email, password}
+    Auth-->>Mobile: {access, refresh}
+    Mobile->>Store: save access + refresh
+    Mobile->>API: GET /items<br/>Authorization: Bearer access
+    API-->>Mobile: 401 (access expired)
+    Mobile->>Store: read refresh
+    Mobile->>Auth: POST /auth/refresh {refresh}
+    Auth-->>Mobile: {access, refresh}
+    Mobile->>Store: replace both tokens
+    Mobile->>API: retry GET /items<br/>Authorization: Bearer access
+    API-->>Mobile: items
+\`\`\`
+
+Native builds and Expo Go need a host address reachable from the device.
+Use http://10.0.2.2:3000 from the Android emulator, localhost from the
+iOS simulator, or the development machine's LAN IP from a physical device.
 `;
 }
 

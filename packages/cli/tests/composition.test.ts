@@ -7,6 +7,8 @@ import {
   GO_MONOLITH_NEXT,
   isImplemented,
   TS_MONOLITH_VITE,
+  TS_MICROSERVICES_VITE_EXPO,
+  TS_MONOLITH_VITE_EXPO,
 } from '../src/composition.js';
 
 describe('composition', () => {
@@ -38,11 +40,19 @@ describe('composition', () => {
       expect(isImplemented(c)).toBe(false);
     });
 
-    it('returns false when mobile is enabled (Expo, Flutter, etc.)', () => {
-      for (const mobile of ['expo', 'flutter'] as const) {
-        const c: Composition = { ...TS_MONOLITH_VITE, mobile };
-        expect(isImplemented(c)).toBe(false);
-      }
+    it('returns true for the TS Expo compositions (issue #18)', () => {
+      expect(isImplemented(TS_MONOLITH_VITE_EXPO)).toBe(true);
+      expect(isImplemented(TS_MICROSERVICES_VITE_EXPO)).toBe(true);
+    });
+
+    it('returns false for Flutter until the polyglot mobile ticket lands', () => {
+      const c: Composition = { ...TS_MONOLITH_VITE, mobile: 'flutter' };
+      expect(isImplemented(c)).toBe(false);
+    });
+
+    it('returns false for Expo on a Go shape', () => {
+      const c: Composition = { ...GO_MONOLITH_NEXT, mobile: 'expo' };
+      expect(isImplemented(c)).toBe(false);
     });
 
     it('returns true for Go + microservices + Next + AI (shape 4 + AI — implemented in issue #16)', () => {

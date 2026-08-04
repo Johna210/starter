@@ -11,7 +11,16 @@
 // (`materialize`, `UnimplementedCompositionError`, `ProjectContext`)
 // is re-exported here unchanged so external imports keep working.
 
-import { type Composition, describeComposition, isGoMicroservicesNext, isGoMicroservicesNextAi, isGoMonolithNext, isImplemented, isTsMicroservicesVite } from './composition.js';
+import {
+  type Composition,
+  describeComposition,
+  isGoMicroservicesNext,
+  isGoMicroservicesNextAi,
+  isGoMonolithNext,
+  isImplemented,
+  isTsMicroservicesVite,
+  isTsMicroservicesViteExpo,
+} from './composition.js';
 // Re-exported to preserve the public API: external code imports
 // `ProjectContext` from '../src/materialize.js'.
 export type { ProjectContext } from './materialize/_shared.js';
@@ -37,13 +46,14 @@ import { writeGoContractMs } from './materialize/go-contract-ms.js';
 import { writeGoContractMsAi } from './materialize/go-contract-ms-ai.js';
 import { writeAi } from './materialize/ai.js';
 import { writeNextWeb } from './materialize/web-next.js';
+import { writeMobile } from './materialize/mobile.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
   constructor(composition: Composition) {
     super(`Composition not yet implemented: ${describeComposition(composition)}.\n` +
-      `The CLI materializer ships one composition in this ticket; the other 23+ are ` +
-      `scheduled for later issues. Please choose another combination.`);
+      `This combination is outside the currently materialized TS, Go, and Expo ` +
+      `shapes. Please choose another combination.`);
     this.name = 'UnimplementedCompositionError';
     this.composition = composition;
   }
@@ -60,7 +70,7 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
     await writeGoMicroservicesNext(ctx, composition);
   } else if (isGoMonolithNext(composition)) {
     await writeGoMonolithBase(ctx, composition);
-  } else if (isTsMicroservicesVite(composition)) {
+  } else if (isTsMicroservicesVite(composition) || isTsMicroservicesViteExpo(composition)) {
     await writeTsMicroservicesVite(ctx, composition);
   } else {
     await writeTsMonolithVite(ctx, composition);
@@ -112,6 +122,9 @@ async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition
 
   await writeApiClient(ctx);
   await writeAuth(ctx);
+  if (composition.mobile === 'expo') {
+    await writeMobile(ctx, composition);
+  }
   if (isAiOn) {
     // Shape 1 + AI on (issue #17): packages/ai — the composable AI
     // primitives (decision 20) as an embedded TS library (decision 5).
@@ -134,6 +147,9 @@ async function writeTsMicroservicesVite(ctx: ProjectContext, composition: Compos
 
   await writeApiClient(ctx, composition);
   await writeAuth(ctx);
+  if (composition.mobile === 'expo') {
+    await writeMobile(ctx, composition);
+  }
   await writeDocs(ctx, composition);
   await writeE2e(ctx, composition);
 }

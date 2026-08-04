@@ -25,6 +25,10 @@
 # Adding a new blessed combination (issue 18) is a single config
 # change: add a row to the matrix and a matching step in the
 # "scaffolded project" job.
+# Per issue 18 (ticket 16), the TS rows materialize the Expo peer app.
+# Expo is part of the blessed TS surface: the mobile workspace is
+# typechecked, and a separate smoke step boots the API and exercises the
+# secure-storage + Bearer + body-refresh flow without an emulator.
 #
 # Per decision 22 the test pyramid is unit + contract + one E2E
 # over items. The starter repo's own tests (contract.sh + vitest)
@@ -54,7 +58,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -244,7 +248,7 @@ jobs:
       - name: Scaffolded project — typecheck (compile-time contract)
         if: matrix.backend == 'ts'
         run: |
-          for ws in packages/db packages/api-client apps/api apps/api-auth apps/web; do
+          for ws in packages/db packages/api-client apps/api apps/api-auth apps/web apps/mobile; do
             if [ -d "$ws" ]; then
               echo "::group::typecheck $ws"
               (cd "$ws" && pnpm typecheck)
@@ -261,6 +265,63 @@ jobs:
           pnpm --filter @starter/contract typecheck
           pnpm --filter @starter/web typecheck
         working-directory: /tmp/test-project
+
+      # ── Expo mobile smoke test (TS shapes, issue 18) ─────────────
+      # The native app cannot run in an ubuntu CI job without an emulator,
+      # so this is the documented minimum smoke surface: compile the Expo
+      # workspace above, boot the real API services, and run the mobile
+      # auth flow against them. ACCESS_TOKEN_TTL=1 forces a real 401 so
+      # the test proves body refresh and secure-storage token rotation.
+      - name: Scaffolded project — Expo mobile auth smoke test
+        if: matrix.backend == 'ts'
+        run: |
+          API_PID=''
+          AUTH_PID=''
+          cleanup() {
+            if [ -n "$API_PID" ]; then kill -TERM -- "-$API_PID" 2>/dev/null || true; fi
+            if [ -n "$AUTH_PID" ]; then kill -TERM -- "-$AUTH_PID" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
+          setsid task dev:api >/tmp/mobile-api.log 2>&1 &
+          API_PID=$!
+          if [ "${{ matrix.shape }}" = "ts-microservices" ]; then
+            setsid task dev:api-auth >/tmp/mobile-api-auth.log 2>&1 &
+            AUTH_PID=$!
+          fi
+          READY=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/health >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then
+            exit 1
+          fi
+          if [ "${{ matrix.shape }}" = "ts-microservices" ]; then
+            READY_AUTH=0
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:3001/health >/dev/null 2>&1; then
+                READY_AUTH=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$READY_AUTH" -ne 1 ]; then
+              exit 1
+            fi
+          fi
+          pnpm --filter @starter/mobile test
+        working-directory: /tmp/test-project
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          JWT_SECRET: ${{ env.JWT_SECRET }}
+          ACCESS_TOKEN_TTL: '1'
+          EXPO_PUBLIC_API_URL: http://localhost:3000
+          EXPO_PUBLIC_AUTH_URL: http://localhost:3001
+          MOBILE_SMOKE_API_URL: http://localhost:3000
+          MOBILE_SMOKE_AUTH_URL: http://localhost:3001
 
       # ── AI-on row: the AI service's own suite (decisions 29) ──────
       # Unit tests against a FakeProvider (a mocked-LLM round-trip is

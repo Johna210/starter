@@ -534,6 +534,37 @@ tasks:
   }
 
   const isMicroservices = composition.topology === 'microservices';
+  const isMobileOn = composition.mobile === 'expo';
+  const mobileDevTask = isMobileOn
+    ? `
+  dev:mobile:
+    desc: Boot the Expo mobile app (scan the QR with Expo Go)
+    dir: apps/mobile
+    cmds:
+      - pnpm start
+`
+    : '';
+  const mobileTestTask = isMobileOn
+    ? `
+  test:mobile:
+    desc: Run the mobile auth smoke test (requires a running api for the live leg)
+    dir: apps/mobile
+    cmds:
+      - pnpm test
+`
+    : '';
+  const mobileBuildTask = isMobileOn
+    ? `
+  build:mobile:
+    desc: Typecheck the Expo mobile workspace
+    dir: apps/mobile
+    cmds:
+      - pnpm typecheck
+`
+    : '';
+  const mobileTestLine = isMobileOn ? '      - task: test:mobile\n' : '';
+  const mobileBuildLine = isMobileOn ? '      - task: build:mobile\n' : '';
+  const mobileDevCommand = isMobileOn ? ' & task dev:mobile' : '';
 
   if (isMicroservices) {
     return `# Taskfile.yml — scaffolded orchestrator (shape 2: TS-microservices).
@@ -542,8 +573,8 @@ tasks:
 # workspace's \`pnpm\` script. Per-workspace detail lives in that
 # workspace's own package.json.
 #
-# Shape 2 boots THREE processes in parallel: web, api (main), and
-# api-auth (sole minter). The vite proxy in apps/web routes /api/auth/*
+# Shape 2 boots web, api (main), and api-auth (sole minter), plus the
+# Expo peer app when mobile is selected. The vite proxy in apps/web routes /api/auth/*
 # to api-auth and /api/* to api.
 
 version: "3"
@@ -556,9 +587,9 @@ tasks:
     silent: true
 
   dev:
-    desc: Boot the full stack (web + api + api-auth) in parallel
+    desc: Boot the full stack (web + api + api-auth${isMobileOn ? ' + Expo mobile' : ''}) in parallel
     cmds:
-      - 'task dev:web & task dev:api & task dev:api-auth & wait'
+      - 'task dev:web & task dev:api & task dev:api-auth${mobileDevCommand} & wait'
 
   dev:web:
     dir: apps/web
@@ -575,6 +606,7 @@ tasks:
     dir: apps/api-auth
     cmds:
       - pnpm dev
+${mobileDevTask}
 
   test:
     desc: Run all tests (unit + contract + the one E2E)
@@ -585,7 +617,7 @@ tasks:
       - task: test:auth
       - task: test:shared
       - task: test:db
-      - task: test:e2e
+${mobileTestLine}      - task: test:e2e
 
   test:web:
     dir: apps/web
@@ -624,6 +656,7 @@ tasks:
     desc: Run the one E2E (items flow). Requires DATABASE_URL + task migrate.
     cmds:
       - pnpm test:e2e
+${mobileTestTask}
 
   migrate:
     desc: Apply pending DB migrations (DATABASE_URL must be set)
@@ -644,6 +677,7 @@ tasks:
       - task: build:api
       - task: build:api-auth
       - task: build:shared
+${mobileBuildLine}
 
   build:web:
     dir: apps/web
@@ -664,6 +698,7 @@ tasks:
     dir: packages/shared
     cmds:
       - pnpm build
+${mobileBuildTask}
 `; 
   }
 
@@ -685,9 +720,9 @@ tasks:
     silent: true
 
   dev:
-    desc: Boot the full stack (web + api) in parallel
+    desc: Boot the full stack (web + api${isMobileOn ? ' + Expo mobile' : ''}) in parallel
     cmds:
-      - 'task dev:web & task dev:api & wait'
+      - 'task dev:web & task dev:api${mobileDevCommand} & wait'
 
   dev:web:
     dir: apps/web
@@ -698,6 +733,7 @@ tasks:
     dir: apps/api
     cmds:
       - pnpm dev
+${mobileDevTask}
 
   test:
     desc: Run all tests (unit + contract + the one E2E)
@@ -707,7 +743,7 @@ tasks:
       - task: test:auth
       - task: test:shared
       - task: test:db
-${isAiOn ? '      - task: test:ai\n' : ''}      - task: test:e2e
+${isAiOn ? '      - task: test:ai\n' : ''}${mobileTestLine}      - task: test:e2e
 
   test:web:
     dir: apps/web
@@ -744,6 +780,7 @@ ${isAiOn ? `  test:ai:
     desc: Run the one E2E (items flow). Requires DATABASE_URL + task migrate.
     cmds:
       - pnpm test:e2e
+${mobileTestTask}
 
   migrate:
     desc: Apply pending DB migrations (DATABASE_URL must be set)
@@ -763,6 +800,7 @@ ${isAiOn ? `  test:ai:
       - task: build:web
       - task: build:api
       - task: build:shared
+${mobileBuildLine}
 
   build:web:
     dir: apps/web
@@ -778,6 +816,7 @@ ${isAiOn ? `  test:ai:
     dir: packages/shared
     cmds:
       - pnpm build
+${mobileBuildTask}
 `;
 }
 
@@ -1359,6 +1398,68 @@ The scaffold ships three test levels:
   const contractLabel = isTs ? 'Hono RPC' : 'OpenAPI';
   const webLabel = isTs ? 'Vite + TanStack' : 'Next.js';
   const apiLabel = isTs ? 'Hono' : 'Gin + Huma';
+  const isMobileOn = composition.mobile === 'expo';
+  const mobileQuickstart = isMobileOn
+    ? `
+
+**Expo mobile**: copy \x60apps/mobile/.env.example\x60 to \x60apps/mobile/.env\x60 and set
+\x60EXPO_PUBLIC_API_URL\x60 to an address reachable from the emulator or device.
+\x60task dev\x60 starts the Expo server as a peer process; scan its QR code with
+Expo Go. Use \x60http://10.0.2.2:3000\x60 for the Android emulator or your computer's
+LAN IP for a physical device.
+`
+    : '';
+  const mobileAuth = isMobileOn
+    ? `
+
+**The mobile-auth flow** (decision 23) is native to the platform: login returns
+both tokens in the response body, \x60apps/mobile\x60 stores them in
+\x60expo-secure-store\x60, and its typed client attaches the access token as a
+Bearer header. A 401 rotates the pair through \x60/auth/refresh\x60 with the
+refresh token in the body, then retries the original request. Mobile never
+depends on the web's httpOnly cookie.
+`
+    : '';
+  const mobileMermaid = isMobileOn
+    ? `
+    subgraph "apps/mobile (Expo)"
+        MM["login + items screens"]
+        MC["@starter/api-client<br/>same typed client as web"]
+        SS["expo-secure-store"]
+    end
+    MM -->|typed call| MC
+    MC -->|Bearer items| ${isMicroservices ? 'R1' : 'R'}
+    MC -->|login + body refresh| ${isMicroservices ? 'R2' : 'R'}
+    MC -->|stores tokens| SS
+`
+    : '';
+  const mobileExtendBullet = isMobileOn
+    ? `- **Add a mobile screen**: create it under \x60apps/mobile/src/screens/\x60 and
+  reach the backend through the shared \x60apiClient\x60; keep access and refresh
+  tokens inside the \x60expo-secure-store\x60 seam.
+`
+    : '';
+  const mobileTaskRows = isMobileOn
+    ? `| \x60task dev:mobile\x60 | Boot the Expo peer app and print its QR code |
+| \x60task test:mobile\x60 | Run the mobile auth smoke test (live API leg in CI) |
+`
+    : '';
+  const mobileTestNote = isMobileOn
+    ? `
+
+The mobile smoke test (\x60apps/mobile/src/lib/auth-flow.test.ts\x60) runs the typed
+client against a live API when \x60MOBILE_SMOKE_API_URL\x60 is set. CI boots the
+API with a one-second access-token TTL so the test proves Bearer attachment,
+body refresh, secure-storage rotation, and retry without an emulator.
+`
+    : '';
+  const mobileBootNote = isMicroservices
+    ? isMobileOn
+      ? '\n\n`task dev` boots four processes in parallel: `apps/web` (port 5173), `apps/api` (port 3000), `apps/api-auth` (port 3001), and `apps/mobile` (Expo). Vite routes `/api/auth/*` to api-auth and `/api/*` to api; the browser sees one same-origin API.'
+      : '\n\n`task dev` boots three processes in parallel: `apps/web` (port 5173), `apps/api` (port 3000), and `apps/api-auth` (port 3001). Vite routes `/api/auth/*` to api-auth and `/api/*` to api; the browser sees one same-origin API.'
+    : isMobileOn
+      ? '\n\n`task dev` boots three processes in parallel: `apps/web`, `apps/api`, and `apps/mobile` (Expo).'
+      : '\n\n`task dev` boots two processes in parallel: `apps/web` and `apps/api`.';
 
   if (isMicroservices) {
     return `# ${name}
@@ -1391,11 +1492,8 @@ task migrate
 task dev
 \`\`\`
 
-\`task dev\` boots three processes in parallel: \`apps/web\` (port 5173),
-\`apps/api\` (port 3000, main API with /items), and \`apps/api-auth\`
-(port 3001, sole minter with /auth/*). Vite's dev proxy routes
-\`/api/auth/*\` to api-auth and \`/api/*\` to api — the browser sees one
-/api endpoint, the httpOnly refresh cookie is first-party.
+${mobileBootNote}
+${mobileQuickstart}
 
 Open http://localhost:5173, click **Sign in**, register an account,
 and you land on the items page.
@@ -1435,6 +1533,7 @@ domain-neutral (decision 10).
 **Your contract spine**: each service's router TS type is the
 contract. The web client is generated from it by \`hc<typeof app>()\`
 — no artifact, no codegen, no separate source of truth.
+${mobileAuth}
 
 \`\`\`mermaid
 graph LR
@@ -1454,6 +1553,7 @@ graph LR
         DB["@starter/db"]
         AUTH["@starter/auth<br/>(shared seam)"]
     end
+${mobileMermaid}
     W -->|typed call| AC
     AC -->|/api/*| R1
     AC -->|/api/auth/*| R2
@@ -1486,9 +1586,10 @@ The scaffold ships honest seams — each is a documented extension point:
 - **Wire a fence from the auth shim** (email-verify, password reset,
   MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
   The fence lands in \`apps/api-auth\`'s \`internal/auth/\` module.
-- **Add a web page**: create a route in \`apps/web/src/pages/\` and
-  register it in \`apps/web/src/router.tsx\`; reach the api through
-  \`apiClient\` / \`apiAuthClient\` (re-exported from \`apps/web/src/lib/api\`).
+ - **Add a web page**: create a route in \`apps/web/src/pages/\` and
+   register it in \`apps/web/src/router.tsx\`; reach the api through
+   \`apiClient\` / \`apiAuthClient\` (re-exported from \`apps/web/src/lib/api\`).
+${mobileExtendBullet}
 
 Each seam is one line + a link into [\`docs/standards/best-practices.md\`](docs/standards/best-practices.md).
 
@@ -1511,8 +1612,9 @@ don't refactor:
 
 | Task | What it does |
 |------|--------------|
-| \`task dev\` | Boot web + api + api-auth in parallel |
+| \`task dev\` | Boot web + api + api-auth${isMobileOn ? ' + Expo mobile' : ''} in parallel |
 | \`task dev:api-auth\` | Boot just the auth service (sole minter) |
+${mobileTaskRows}
 | \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
@@ -1528,8 +1630,9 @@ It boots the stack via \`task dev\` (web + api + api-auth), logs in,
 creates an item via the form, and asserts the item persists across a
 page reload. This is the **only** E2E the starter owns — per-feature
 E2Es are your job. The full rulebook is in
-[\`docs/test-strategy.md\`](docs/test-strategy.md).
-`;
+ [\`docs/test-strategy.md\`](docs/test-strategy.md).
+${mobileTestNote}
+ `;
   }
 
   return `# ${name}
@@ -1563,6 +1666,8 @@ http://localhost:3000. Vite proxies \`/api\` to the api, so the web
 talks to the api over a same-origin path (the httpOnly refresh cookie
 is always first-party). Try it: open http://localhost:5173, click
 **Sign in**, register an account, and you land on the items page.
+${mobileBootNote}
+${mobileQuickstart}
 
 - \`GET /items\` returns the list (${apiLabel} route → \`requireAuth\` → \`ItemsRepo.list()\` → Drizzle → Postgres).
 - \`POST /items\` with \`{ "name": "..." }\` creates a row and returns it.
@@ -1595,6 +1700,7 @@ for transparent renewal (decision 16).
 **Your contract spine**: the router's TS type is the contract. The web
 client is generated from it by \`hc<typeof app>()\` — no artifact,
 no codegen, no separate source of truth.
+${mobileAuth}
 
 \`\`\`mermaid
 graph LR
@@ -1610,6 +1716,7 @@ graph LR
         DB["@starter/db"]
         AUTH["@starter/auth"]
     end
+${mobileMermaid}
     W -->|typed call| AC
     AC -->|HTTP + Bearer| R
     R -->|mounts| M
@@ -1629,8 +1736,9 @@ The scaffold ships honest seams — each is a documented extension point:
   \`<name>.repo.ts\` (interface) + \`<name>.routes.ts\` (Hono) +
   \`index.ts\` (mountable module); mount it in \`apps/api/src/index.ts\`.
   Behind \`requireAuth\` if it needs an authenticated principal.
-- **Wire a fence from the auth shim** (email-verify, password reset,
-  MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
+ - **Wire a fence from the auth shim** (email-verify, password reset,
+   MFA, OAuth, RBAC): see \`docs/wire-it-in/auth.md\` for the seams.
+${mobileExtendBullet}
 ${isAiOn ? `- **Wire in the AI primitives** (issue #17, decision 20): \`packages/ai\`
   ships chat completion (with streaming), embeddings, a \`VectorStore\`
   interface (pgvector default over the db's \`embeddings\` table), and
@@ -1669,7 +1777,8 @@ don't refactor:
 
 | Task | What it does |
 |------|--------------|
-| \`task dev\` | Boot web + api in parallel |
+| \`task dev\` | Boot web + api${isMobileOn ? ' + Expo mobile' : ''} in parallel |
+${mobileTaskRows}
 | \`task test\` | Run all tests: unit + contract + the one E2E (decision 22) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task test:auth\` | Run the auth shim's unit tests (real argon2 + jose, no mocks) |
@@ -1685,6 +1794,7 @@ which drives the web→api→db composition through a real browser (Playwright).
 It boots the stack via \`task dev\`, logs in, creates an item via the form,
 and asserts the item persists across a page reload. This is the **only** E2E
 the starter owns — per-feature E2Es are your job. The full rulebook is in
-[\`docs/test-strategy.md\`](docs/test-strategy.md).
-`;
+ [\`docs/test-strategy.md\`](docs/test-strategy.md).
+${mobileTestNote}
+ `;
 }
