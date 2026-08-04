@@ -46,7 +46,6 @@ function mobilePackageJson(): string {
       },
       dependencies: {
         '@starter/api-client': 'workspace:*',
-        '@starter/shared': 'workspace:*',
         expo: '~57.0.0',
         'expo-secure-store': '~57.0.1',
         react: '^19.2.3',
@@ -590,7 +589,10 @@ describeLive('mobile auth against a running api', () => {
     const access = await auth.signIn({ email, password: 'password1234' });
     expect(access).toBe(secureStore.values.get(storage.ACCESS_TOKEN_KEY));
     expect(secureStore.values.get(storage.REFRESH_TOKEN_KEY)).toBeTruthy();
-    expect(secureStore.setItemAsync).toHaveBeenCalledTimes(2);
+    // At least the login pair: with ACCESS_TOKEN_TTL=1 a slow run may
+    // also exercise the refresh leg before the items call, writing the
+    // rotated pair — the refresh test covers that path explicitly.
+    expect(secureStore.setItemAsync.mock.calls.length).toBeGreaterThanOrEqual(2);
 
     const response = await mobile.apiClient.items.$get();
     expect(response.ok).toBe(true);
