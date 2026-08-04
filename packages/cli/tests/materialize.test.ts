@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Composition, TS_MONOLITH_VITE, TS_MICROSERVICES_VITE } from '../src/composition.js';
+import {
+  type Composition,
+  TS_MICROSERVICES_VITE,
+  TS_MICROSERVICES_VITE_EXPO,
+  TS_MONOLITH_VITE,
+  TS_MONOLITH_VITE_EXPO,
+} from '../src/composition.js';
 import { materialize, UnimplementedCompositionError } from '../src/materialize.js';
 
 describe('materialize', () => {
@@ -1057,6 +1063,91 @@ describe('materialize', () => {
       // order, with the matching tag (the file the migrator reads).
       const tags = journal.entries.map((e: { tag: string }) => e.tag);
       expect(tags).toEqual(['0000_items', '0001_users', '0002_refresh_tokens']);
+    });
+  });
+
+  describe('TS + Expo mobile (issue #18)', () => {
+    it('writes an Expo workspace with the secure-store dependency', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE_EXPO);
+      const mobileDir = join(targetDir, 'apps/mobile');
+      expect((await stat(mobileDir)).isDirectory()).toBe(true);
+      for (const file of [
+        'package.json',
+        'app.json',
+        'index.ts',
+        'tsconfig.json',
+        '.env.example',
+        'src/App.tsx',
+        'src/auth.ts',
+        'src/config.ts',
+        'src/lib/api.ts',
+        'src/lib/token-storage.ts',
+        'src/lib/auth-flow.test.ts',
+        'src/screens/LoginScreen.tsx',
+        'src/screens/ItemsScreen.tsx',
+      ]) {
+        expect((await stat(join(mobileDir, file))).isFile(), `${file} should exist`).toBe(true);
+      }
+
+      const pkg = JSON.parse(await readFile(join(mobileDir, 'package.json'), 'utf8'));
+      expect(pkg.dependencies.expo).toEqual(expect.any(String));
+      expect(pkg.dependencies['expo-secure-store']).toEqual(expect.any(String));
+      expect(pkg.dependencies['@starter/api-client']).toBe('workspace:*');
+      expect(pkg.main).toBe('index.ts');
+    });
+
+    it('uses the shared typed api-client and secure-storage Bearer refresh flow', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE_EXPO);
+      const api = await readFile(join(targetDir, 'apps/mobile/src/lib/api.ts'), 'utf8');
+      const storage = await readFile(join(targetDir, 'apps/mobile/src/lib/token-storage.ts'), 'utf8');
+      const auth = await readFile(join(targetDir, 'apps/mobile/src/auth.ts'), 'utf8');
+
+      expect(api).toContain('@starter/api-client');
+      expect(api).toContain('createApiClient');
+      expect(api).toContain('Authorization');
+      expect(api).toContain('Bearer');
+      expect(api).toContain('refresh');
+      expect(api).toContain('json: { refresh }');
+      expect(storage).toContain('expo-secure-store');
+      expect(storage).toContain('setItemAsync');
+      expect(storage).toContain('getItemAsync');
+      expect(auth).toContain('setTokens');
+      expect(auth).toContain('data.access');
+      expect(auth).toContain('data.refresh');
+    });
+
+    it('ships login and items screens plus mobile Taskfile/docs seams', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE_EXPO);
+      const login = await readFile(join(targetDir, 'apps/mobile/src/screens/LoginScreen.tsx'), 'utf8');
+      const items = await readFile(join(targetDir, 'apps/mobile/src/screens/ItemsScreen.tsx'), 'utf8');
+      const taskfile = await readFile(join(targetDir, 'Taskfile.yml'), 'utf8');
+      const readme = await readFile(join(targetDir, 'README.md'), 'utf8');
+      const mobileDocs = await readFile(join(targetDir, 'docs/architecture/mobile-auth-flow.md'), 'utf8');
+
+      expect(login).toMatch(/signIn|Sign in/);
+      expect(login).toContain('secureTextEntry');
+      expect(items).toContain('apiClient.items.$get()');
+      expect(items).toContain('apiClient.items.$post');
+      expect(taskfile).toMatch(/^  dev:mobile:/m);
+      expect(taskfile).toMatch(/^  test:mobile:/m);
+      expect(taskfile).toMatch(/^  build:mobile:/m);
+      expect(readme).toMatch(/Expo mobile|mobile-auth|secure-store/i);
+      expect(mobileDocs).toMatch(/secure-store|body|Bearer|refresh/i);
+    });
+
+    it('configures two typed clients for TS microservices + Expo', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MICROSERVICES_VITE_EXPO);
+      const pkg = JSON.parse(await readFile(join(targetDir, 'apps/mobile/package.json'), 'utf8'));
+      const api = await readFile(join(targetDir, 'apps/mobile/src/lib/api.ts'), 'utf8');
+      const config = await readFile(join(targetDir, 'apps/mobile/src/config.ts'), 'utf8');
+      const env = await readFile(join(targetDir, 'apps/mobile/.env.example'), 'utf8');
+
+      expect(pkg.dependencies['@starter/api-client']).toBe('workspace:*');
+      expect(api).toContain('createApiClient');
+      expect(api).toContain('createApiAuthClient');
+      expect(api).toContain('apiAuthClient');
+      expect(config).toContain('EXPO_PUBLIC_AUTH_URL');
+      expect(env).toContain('EXPO_PUBLIC_AUTH_URL');
     });
   });
 
