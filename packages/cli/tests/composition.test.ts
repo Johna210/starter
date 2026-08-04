@@ -49,11 +49,14 @@ describe('composition', () => {
       expect(isImplemented(GO_MICROSERVICES_NEXT_AI)).toBe(true);
     });
 
-    it('returns false when AI is on for every other shape (AI is a shape-4-only axis today)', () => {
-      for (const base of [TS_MONOLITH_VITE, GO_MONOLITH_NEXT]) {
-        const c: Composition = { ...base, ai: 'on' };
-        expect(isImplemented(c), `${describeComposition(c)} should be unimplemented`).toBe(false);
-      }
+    it('returns true for TS-monolith + AI on (shape 1 + AI — implemented in issue #17)', () => {
+      const c: Composition = { ...TS_MONOLITH_VITE, ai: 'on' };
+      expect(isImplemented(c)).toBe(true);
+    });
+
+    it('returns false when AI is on for every other non-AI shape (AI is a TS-monolith + Go-microservices axis today)', () => {
+      const c: Composition = { ...GO_MONOLITH_NEXT, ai: 'on' };
+      expect(isImplemented(c), `${describeComposition(c)} should be unimplemented`).toBe(false);
     });
   });
 

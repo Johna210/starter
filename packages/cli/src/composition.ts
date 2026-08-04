@@ -35,6 +35,26 @@ export const TS_MONOLITH_VITE: Composition = {
   ai: 'off',
 };
 
+/**
+ * Shape 1 + AI on (issue #17): the TS-monolith composition with the
+ * AI primitives package (decision 5 — TS shapes ship AI as an embedded
+ * TS library in packages/ai). packages/ai exposes the composable
+ * primitives (decision 20): chat completion (with streaming),
+ * embeddings, a VectorStore interface (pgvector default, reusing
+ * decision 14's Postgres), and tool/function calling — each a real
+ * typed layer over a vetted SDK. No example composition is shipped.
+ * This is an UNBLESSED combination (decision 24/29): generatable, but
+ * AI is not in the CI-tested matrix — the CLI emits a documented
+ * warning.
+ */
+export const TS_MONOLITH_VITE_AI: Composition = {
+  backend: 'ts',
+  topology: 'monolith',
+  web: 'vite',
+  mobile: 'none',
+  ai: 'on',
+};
+
 /** Shape 2: TS-microservices + Vite+TanStack (issue #12). */
 export const TS_MICROSERVICES_VITE: Composition = {
   backend: 'ts',
@@ -100,6 +120,7 @@ export const GO_MICROSERVICES_NEXT_AI: Composition = {
 export function isImplemented(c: Composition): boolean {
   return (
     isTsMonolithVite(c) ||
+    isTsMonolithViteAi(c) ||
     isTsMicroservicesVite(c) ||
     isGoMonolithNext(c) ||
     isGoMicroservicesNext(c) ||
@@ -115,6 +136,16 @@ export function isTsMonolithVite(c: Composition): boolean {
     c.web === TS_MONOLITH_VITE.web &&
     c.mobile === TS_MONOLITH_VITE.mobile &&
     c.ai === TS_MONOLITH_VITE.ai
+  );
+}
+
+export function isTsMonolithViteAi(c: Composition): boolean {
+  return (
+    c.backend === TS_MONOLITH_VITE_AI.backend &&
+    c.topology === TS_MONOLITH_VITE_AI.topology &&
+    c.web === TS_MONOLITH_VITE_AI.web &&
+    c.mobile === TS_MONOLITH_VITE_AI.mobile &&
+    c.ai === TS_MONOLITH_VITE_AI.ai
   );
 }
 
