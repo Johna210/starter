@@ -1,8 +1,9 @@
 // Materializer: writes the scaffolded project for a given composition.
 //
-// Per issue #3, only the TS-monolith + Vite+TanStack + no-mobile + no-AI
-// composition is materializable. All other compositions throw an
-// UnimplementedCompositionError; the CLI's own tests assert both paths.
+// The TS-monolith + Vite+TanStack + no-mobile composition is
+// materializable with AI on or off (issue #17: AI on adds packages/ai).
+// Unimplemented compositions throw an UnimplementedCompositionError;
+// the CLI's own tests assert both paths.
 //
 // Per issue #27, the per-workspace templates + writes live in
 // ./materialize/<workspace>.ts; this file is a flat orchestrator that
@@ -34,6 +35,7 @@ import { writeGoAiService } from './materialize/go-ai-service.js';
 import { writeGoContract } from './materialize/go-contract.js';
 import { writeGoContractMs } from './materialize/go-contract-ms.js';
 import { writeGoContractMsAi } from './materialize/go-contract-ms-ai.js';
+import { writeAi } from './materialize/ai.js';
 import { writeNextWeb } from './materialize/web-next.js';
 
 export class UnimplementedCompositionError extends Error {
@@ -99,16 +101,24 @@ async function writeGoMonolithBase(ctx: ProjectContext, composition: Composition
 }
 
 async function writeTsMonolithVite(ctx: ProjectContext, composition: Composition): Promise<void> {
+  const isAiOn = composition.ai === 'on';
   await writeRoot(ctx, composition);
   await writeWeb(ctx);
   await writeApi(ctx);
   await writeApiAuth(ctx);
 
   await writeShared(ctx);
-  await writeDb(ctx);
+  await writeDb(ctx, { aiOn: isAiOn });
 
   await writeApiClient(ctx);
   await writeAuth(ctx);
+  if (isAiOn) {
+    // Shape 1 + AI on (issue #17): packages/ai — the composable AI
+    // primitives (decision 20) as an embedded TS library (decision 5).
+    // Absent entirely when AI is off (decision 21: zero AI dependency
+    // surface for non-AI projects).
+    await writeAi(ctx);
+  }
   await writeDocs(ctx, composition);
   await writeE2e(ctx, composition);
 }
