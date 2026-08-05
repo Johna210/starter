@@ -26,7 +26,10 @@ function sharedPackageJson(): string {
       main: './src/index.ts',
       scripts: {
         build: 'tsc -p tsconfig.build.json',
-        test: 'vitest run',
+        // shared ships zod schemas + pure utils (decision 26); its
+        // surface is type-level today, so an empty suite must not
+        // fail `task test` (the same tolerance CI applies).
+        test: 'vitest run --passWithNoTests',
         typecheck: 'tsc --noEmit',
       },
       dependencies: {

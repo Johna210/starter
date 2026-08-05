@@ -229,16 +229,25 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
   },
-  webServer: {
-    // Migrate first so the api's first request doesn't 500 on a
-    // missing table; then boot the full stack. \`task migrate\` is
-    ${migrateNote}
-    command: 'task migrate && task dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-    ${bootTimeNote}
-    timeout: 180_000,
-  },
+  // Boot the stack only when a DB is available: the spec skips cleanly
+  // when DATABASE_URL is unset (see e2e/items-flow.spec.ts), and
+  // without a DB there is nothing to boot — so \`task test\` stays
+  // runnable on a fresh scaffold (decision 22's pyramid without a
+  // Postgres). CI provides a Postgres service and sets DATABASE_URL.
+  ...(process.env.DATABASE_URL
+    ? {
+        webServer: {
+          // Migrate first so the api's first request doesn't 500 on a
+          // missing table; then boot the full stack. \`task migrate\` is
+          ${migrateNote}
+          command: 'task migrate && task dev',
+          url: 'http://localhost:5173',
+          reuseExistingServer: !process.env.CI,
+          ${bootTimeNote}
+          timeout: 180_000,
+        },
+      }
+    : {}),
   // The items flow does a register + login + query + mutation + reload
   // and waits for the network on each step; generous default below.
   timeout: 60_000,

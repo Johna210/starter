@@ -77,6 +77,11 @@ function dbPackageJson(): string {
         generate: 'drizzle-kit generate',
         migrate: 'drizzle-kit migrate',
         studio: 'drizzle-kit studio',
+        // The db package ships no unit tests (decision 14's repo layer
+        // is tested in apps/api against a real DB; the schema itself is
+        // verified by `task migrate` + the repo tests) — an empty suite
+        // must not fail `task test` (the same tolerance CI applies).
+        test: 'vitest run --passWithNoTests',
         typecheck: 'tsc --noEmit',
       },
       dependencies: {
@@ -88,6 +93,7 @@ function dbPackageJson(): string {
         '@types/pg': '^8.11.10',
         'drizzle-kit': '^0.28.0',
         typescript: '^5.9.3',
+        vitest: '^4.1.10',
       },
     },
     null,

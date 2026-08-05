@@ -135,6 +135,19 @@ describe('materialize', () => {
       expect(pkg.dependencies.zod).toEqual(expect.any(String));
     });
 
+    it('empty test suites pass: web/shared/db run vitest with --passWithNoTests (task test stays green, ticket 18)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      for (const ws of ['apps/web', 'packages/shared', 'packages/db']) {
+        const pkg = JSON.parse(
+          await readFile(join(targetDir, `${ws}/package.json`), 'utf8'),
+        );
+        expect(
+          pkg.scripts?.test,
+          `${ws} should tolerate an empty suite so \`task test\` passes on a fresh scaffold`,
+        ).toContain('--passWithNoTests');
+      }
+    });
+
     it('apps/web main.tsx wires up TanStack Router + TanStack Query providers', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const main = await readFile(join(targetDir, 'apps/web/src/main.tsx'), 'utf8');
@@ -997,6 +1010,16 @@ describe('materialize', () => {
       expect(cfg).toMatch(/webServer/);
       expect(cfg).toMatch(/task\s+dev/);
       expect(cfg).toMatch(/localhost:5173/);
+    });
+
+    it('playwright.config.ts boots the webServer only when DATABASE_URL is set (the spec skips otherwise, ticket 18)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const cfg = await readFile(join(targetDir, 'playwright.config.ts'), 'utf8');
+      // The webServer is conditionally spread: without a DB there is
+      // nothing to boot, so `task test` stays runnable on a fresh
+      // scaffold (decision 22's pyramid without a Postgres).
+      expect(cfg).toMatch(/process\.env\.DATABASE_URL/);
+      expect(cfg).toMatch(/webServer: \{/);
     });
 
     it('root package.json declares @playwright/test as a devDependency (issue 09)', async () => {

@@ -42,7 +42,11 @@ function webPackageJson(): string {
       scripts: {
         dev: 'vite --port 5173 --host',
         build: 'vite build',
-        test: 'vitest run',
+        // The Vite+TanStack web ships no unit tests (decision 22's
+        // modules are the api repo layer + the auth shim; the web's
+        // auth flow is covered by the one E2E) — an empty suite must
+        // not fail `task test` (the same tolerance CI applies).
+        test: 'vitest run --passWithNoTests',
         typecheck: 'tsc --noEmit',
       },
       dependencies: {
