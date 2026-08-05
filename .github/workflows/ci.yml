@@ -22,9 +22,9 @@
 # mocked-LLM round-trip is a unit test, not a CI integration). The
 # row is "generatable but not CI-tested" in the blessed sense — the
 # items E2E guarantee applies only to the 4 blessed combos.
-# Adding a new blessed combination (issue 18) is a single config
-# change: add a row to the matrix and a matching step in the
-# "scaffolded project" job.
+# Adding a new blessed combination (the ticket-18 playbook) is a
+# single config change: add a row to the matrix and a matching step
+# in the "scaffolded project" job.
 # Per issue 18 (ticket 16), the TS rows materialize the Expo peer app.
 # Expo is part of the blessed TS surface: the mobile workspace is
 # typechecked, and a separate smoke step boots the API and exercises the
@@ -35,6 +35,17 @@
 # subosito/flutter-action, and a build-and-boot smoke step boots the Go
 # services and runs the mobile auth flow (flutter analyze + flutter
 # test against the live api; ACCESS_TOKEN_TTL=1 forces a real 401).
+#
+# Per issue 20 (ticket 18) the four rows above are the **blessed-4
+# envelope** (decisions 7/24): every row runs unit + contract + the
+# one E2E over items with mobile on and AI excluded. The scaffolded
+# project's own `task test` passes on every shape — workspaces with no
+# tests (apps/web, packages/shared, packages/db) run vitest with
+# --passWithNoTests, and the Playwright config skips its webServer
+# when DATABASE_URL is unset — so the per-workspace loops below
+# verify the same seams a user runs locally. A tsc/go-build-clean PR
+# with all 4 rows green is the stability claim the 1.0 transition
+# (ticket 21) mechanically checks.
 #
 # Per decision 22 the test pyramid is unit + contract + one E2E
 # over items. The starter repo's own tests (contract.sh + vitest)
@@ -227,18 +238,22 @@ jobs:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
       # ── TS shapes: per-workspace unit tests ─────────────────────
+      # Every listed workspace ships a runnable `pnpm test` — empty
+      # suites pass via --passWithNoTests, so this step verifies the
+      # same workspaces the scaffolded `task test` runs (decision 22's
+      # pyramid without the E2E, which runs later once browsers are
+      # installed). The directory check only skips workspaces a shape
+      # doesn't ship (apps/api-auth is microservices-only).
       - name: Scaffolded project — unit tests (TS shapes)
         if: matrix.backend == 'ts'
         run: |
-          # Continue past workspaces with no test files (vitest exits 1).
-          # Only fail if a workspace has tests that actually fail.
           FAILED=0
           for ws in apps/web apps/api apps/api-auth packages/auth packages/shared packages/db; do
             echo "::group::test $ws"
-            if [ -d "$ws" ] && ls "$ws"/src/**/*.test.{ts,tsx,js,jsx} >/dev/null 2>&1; then
+            if [ -d "$ws" ]; then
               (cd "$ws" && pnpm test) || FAILED=1
             else
-              echo "No test files — skipping"
+              echo "Not in this shape — skipping"
             fi
             echo "::endgroup::"
           done
