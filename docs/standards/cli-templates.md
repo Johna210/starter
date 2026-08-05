@@ -13,7 +13,11 @@ Templates are **not** static files with `{{variable}}` interpolation
 that take the composition and return file contents:
 
 - each workspace has one module (`root.ts`, `web.ts`, `api.ts`,
-  `docs.ts`, `go-api.ts`, …) exporting `write<Workspace>(ctx, composition)`;
+  `docs.ts`, `go-api.ts`, …) exporting a `write<Workspace>` function;
+  the signatures vary with the workspace — composition is passed where
+  the workspace is composition-conditional (`writeDocs(ctx,
+  composition)`, `writeWeb(ctx, composition?)`), and a workspace that
+  never branches on the composition takes `ctx` only;
 - `materialize.ts` is the flat orchestrator delegating to each module;
 - every file write goes through `writeFileRecursive` from `_shared.ts`.
 

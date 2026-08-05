@@ -10,18 +10,18 @@ this entry is the checklist against the contribution model.
 ## What a fence is
 
 A fence is a **deliberate handoff**: a capability the starter does *not*
-ship (OAuth/PKCE, MFA, email verification, password reset, RBAC), but
-whose **seam** is real — the shim owns the surface, the user owns the
-implementation. A fence is only viable when the "genuinely real"
-version is unbounded scope; and a fence is never a stub (a real seam
-wrapping a fake capability is the bait-and-switch decision 12
-rejected).
+ship (email verification, password reset, MFA, account lockout,
+social/OAuth, RBAC — decision 12's exact list), but whose **seam** is
+real — the shim owns the surface, the user owns the implementation. A
+fence is only viable when the "genuinely real" version is unbounded
+scope; and a fence is never a stub (a real seam wrapping a fake
+capability is the bait-and-switch decision 12 rejected).
 
-## The four places the fence lands
+## The three places, plus the test pyramid
 
 Decision 34/decision 12's fence lives in **three** places (the shim,
-the `/docs/wire-it-in/` guide, the CLI prompt) plus the test pyramid —
-the checklist:
+the `/docs/wire-it-in/` guide, the CLI prompt) — and the test pyramid
+(decision 22) is the fourth thing the checklist covers:
 
 ### 1. The shim (`packages/*`)
 

@@ -59,11 +59,12 @@ its own stack — no skipped steps, no reduced surface.
 
 ### 5. Mobile smoke (web + mobile are blessed)
 
-The shape's mobile app (if mobile is on — and the blessed envelope runs
-**mobile on**) gets the build-and-boot smoke: compiles, boots, and the
-mobile auth flow (decision 23) runs against the api — secure storage +
-Bearer + body-refresh, with `ACCESS_TOKEN_TTL=1` forcing a real 401 so
-rotation is exercised.
+The shape's mobile app gets the build-and-boot smoke (mobile is part
+of the blessed envelope — decision 29 runs **mobile on**: Expo for TS
+shapes, Flutter for Go shapes): compiles, boots, and the mobile auth
+flow (decision 23) runs against the api. The exact mechanism
+(secure storage + Bearer + body-refresh, `ACCESS_TOKEN_TTL=1` forcing
+a real 401) is in [`../standards/ci-matrix.md`](../standards/ci-matrix.md).
 
 ### 6. The docs stay in sync
 

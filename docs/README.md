@@ -22,7 +22,8 @@ asymmetry).
 
 ## The contribution playbook (`contributing/`)
 
-Six entries, one per axis of the five-axis composition:
+Six entries — how to add a new X to the five-axis composition
+(decision 24):
 
 - [Add a new web variant](contributing/web-variant.md) (decision 15)
 - [Add a new api framework](contributing/api-framework.md) (decision 18)

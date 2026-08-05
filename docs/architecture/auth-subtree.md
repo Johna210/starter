@@ -18,13 +18,14 @@ upstream libraries that owns the **surface** of auth:
 It does **not** ship the crypto (that lives in audited libraries), and
 it does **not** ship everything a real auth system might want —
 everything beyond the shim's scope is **fenced off** as "wire it in:
-here's the seam" (OAuth/PKCE, MFA, email verification, password reset,
-RBAC). A "genuinely real minimal auth" was rejected (real auth has no
-minimum; shipping it makes the starter a maintained auth framework), as
-was a "documented stub" (a real seam wrapping a fake capability is
-the same bait-and-switch rejected at every layer). Fences are the third
-path: the seam is real, the shim is honest, the rest is a deliberate
-handoff.
+here's the seam" (email verification, password reset, MFA, account
+lockout, social/OAuth, RBAC beyond a single authenticated principal —
+decision 12's exact list). A "genuinely real minimal auth" was rejected
+(real auth has no minimum; shipping it makes the starter a maintained
+auth framework), as was a "documented stub" (a real seam wrapping a
+fake capability is the same bait-and-switch rejected at every layer).
+Fences are the third path: the seam is real, the shim is honest, the
+rest is a deliberate handoff.
 
 ## The sole-minter invariant (decision 11)
 

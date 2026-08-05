@@ -51,7 +51,9 @@ Every fence gets a single doc in the scaffolded project's
   table/column/route/primitive), and links to the audited libraries the
   user would reach for. Decision 30: each fenced item is "a single doc:
   what the seam is, why it's fenced, what a real implementation looks
-  like, links to the audited libraries."
+  like, links to the audited libraries." The fenced items today are
+decision 12's exact list (email verification, password reset, MFA,
+account lockout, social/OAuth, RBAC) and decision 20's AI composition.
 
 ### 3. The CLI prompt
 
