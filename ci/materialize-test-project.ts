@@ -7,8 +7,13 @@
 //
 // Usage: npx tsx ci/materialize-test-project.ts [target-dir] [shape]
 //
-// shape: 'ts-monolith' (default, with Expo) | 'ts-microservices' (with Expo) | 'go-monolith' | 'go-microservices' | 'go-microservices-ai'
+// shape: 'ts-monolith' (default, with Expo) | 'ts-microservices' (with Expo) | 'go-monolith' (with Flutter) | 'go-microservices' (with Flutter) | 'go-microservices-ai'
 // target-dir defaults to /tmp/test-project.
+//
+// Decision 29: the blessed matrix runs the 4 combos with **mobile on** —
+// Expo for TS shapes, Flutter for Go shapes (web + mobile are blessed;
+// AI is not). The AI-on row is the unblessed extra and stays
+// mobile-off (no Flutter scaffold there).
 
 import { resolve } from 'node:path';
 import { rm } from 'node:fs/promises';
@@ -16,7 +21,9 @@ import {
   type Composition,
   GO_MICROSERVICES_NEXT,
   GO_MICROSERVICES_NEXT_AI,
+  GO_MICROSERVICES_NEXT_FLUTTER,
   GO_MONOLITH_NEXT,
+  GO_MONOLITH_NEXT_FLUTTER,
   TS_MICROSERVICES_VITE_EXPO,
   TS_MONOLITH_VITE_EXPO,
 } from '../packages/cli/src/composition.js';
@@ -31,9 +38,9 @@ function compositionForShape(shape: string): Composition {
     case 'ts-microservices':
       return TS_MICROSERVICES_VITE_EXPO;
     case 'go-monolith':
-      return GO_MONOLITH_NEXT;
+      return GO_MONOLITH_NEXT_FLUTTER;
     case 'go-microservices':
-      return GO_MICROSERVICES_NEXT;
+      return GO_MICROSERVICES_NEXT_FLUTTER;
     case 'go-microservices-ai':
       return GO_MICROSERVICES_NEXT_AI;
     default:
