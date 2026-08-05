@@ -4,7 +4,7 @@ Scaffold a new fullstack project from the [Starter](../../). The CLI
 composes five prompt axes (backend language, topology, web variant,
 mobile, AI) and writes a runnable monorepo.
 
-> **Status (`0.1.0`):** eight compositions are materializable:
+> **Status (`0.1.0`):** ten compositions are materializable:
 >
 > - **TS-monolith + Vite+TanStack + no mobile + no AI** (shape 1)
 > - **TS-monolith + Vite+TanStack + Expo + no AI** (shape 1 + mobile)
@@ -13,8 +13,12 @@ mobile, AI) and writes a runnable monorepo.
 > - **TS-microservices + Vite+TanStack + no mobile + no AI** (shape 2)
 > - **TS-microservices + Vite+TanStack + Expo + no AI** (shape 2 + mobile)
 > - **Go-monolith + Next.js + no mobile + no AI** (shape 3)
+> - **Go-monolith + Next.js + Flutter + no AI** (shape 3 + mobile;
+>   the Flutter peer app consumes the codegen'd Dart client, issue #19)
 > - **Go-microservices + Next.js + no mobile + no AI** (shape 4: example
 >   split — apps/api-auth as the sole minter, JWKS-verified apps/api)
+> - **Go-microservices + Next.js + Flutter + no AI** (shape 4 + mobile,
+>   issue #19)
 > - **Go-microservices + Next.js + no mobile + AI** (shape 4 + AI;
 >   generatable but not in the blessed matrix)
 >

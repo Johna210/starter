@@ -61,8 +61,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
   if (!isImplemented(composition)) {
     const message = `This composition is not yet implemented: ${describeComposition(composition)}.\n` +
-      `This combination is outside the currently materialized TS, Go, and Expo ` +
-      `shapes. Please choose another combination.`;
+      `This combination is outside the currently materialized TS, Go, Expo, and ` +
+      `Flutter shapes. Please choose another combination.`;
     p.cancel(message);
     return { ok: false, reason: 'unimplemented', message, exitCode: 1 };
   }
@@ -160,8 +160,12 @@ For this ticket the implemented compositions are:
   - ts-microservices + vite + no-mobile + no-AI (shape 2)
   - ts-microservices + vite + Expo mobile + no-AI (shape 2 + Expo, issue #18)
   - go-monolith + next + no-mobile + no-AI (shape 3)
+  - go-monolith + next + Flutter mobile + no-AI (shape 3 + Flutter,
+    issue #19)
   - go-microservices + next + no-mobile + no-AI (shape 4: example
     split + JWKS verify)
+  - go-microservices + next + Flutter mobile + no-AI (shape 4 +
+    Flutter, issue #19)
   - go-microservices + next + no-mobile + AI (shape 4: Python/FastAPI
     AI service — generatable but NOT CI-tested, decision 24/29; a
     warning is emitted at scaffold time)
