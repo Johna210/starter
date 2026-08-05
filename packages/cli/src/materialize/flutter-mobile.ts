@@ -84,8 +84,14 @@ over the committed \`openapi.yaml\`, decision 19) — never a TS package.
 \`\`\`sh
 cd apps/mobile
 flutter pub get
+flutter create . --platforms=android,ios   # one-time: generate the platform folders
 flutter run --dart-define=API_URL=http://10.0.2.2:3000
 \`\`\`
+
+\`flutter create .\` is a one-time step — the scaffold ships the Dart
+source, pubspec, and tests, but not the generated android/ios platform
+folders (they are device-agnostic boilerplate; CI exercises the app in
+the Dart VM instead, decision 29's documented minimum).
 
 \`--dart-define\` is the Flutter equivalent of env vars (baked in at
 compile time). \`API_URL\` defaults to \`http://localhost:3000\`; the

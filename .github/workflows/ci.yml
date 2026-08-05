@@ -183,7 +183,7 @@ jobs:
       # cache are keyed on the Flutter version, so the first Go row
       # downloads it and the second reuses it.
       - name: Setup Flutter (Go shapes)
-        if: matrix.backend == 'go'
+        if: matrix.backend == 'go' && matrix.ai != 'true'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -291,7 +291,7 @@ jobs:
       # Go services in the Dart VM. ACCESS_TOKEN_TTL=1 forces a real
       # 401 so body refresh + token rotation are exercised, no emulator.
       - name: Scaffolded project — Flutter mobile auth smoke test
-        if: matrix.backend == 'go'
+        if: matrix.backend == 'go' && matrix.ai != 'true'
         run: |
           API_PID=''
           AUTH_PID=''

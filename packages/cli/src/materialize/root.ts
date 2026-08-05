@@ -93,7 +93,7 @@ function rootTaskfileYml(composition: Composition): string {
   const mobileDevTask = isFlutterOn
     ? `
   dev:mobile:
-    desc: Run the Flutter peer app on a connected device/emulator (decision 23)
+    desc: Run the Flutter peer app on a device/emulator (decision 23; run \`flutter create . --platforms=android,ios\` once first)
     dir: apps/mobile
     cmds:
       - flutter run --dart-define=API_URL=http://10.0.2.2:3000${isMicroservices ? ' --dart-define=AUTH_URL=http://10.0.2.2:3001' : ''}
@@ -874,6 +874,13 @@ coverage/
 .env.local
 *.tsbuildinfo
 .DS_Store
+# Flutter / Dart artifacts (apps/mobile, the contract's Dart client)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+ios/Pods/
+ios/.symlinks/
 `;
 }
 
