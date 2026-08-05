@@ -193,6 +193,7 @@ describe('Go-microservices + Next + no-mobile + no-AI (shape 4, issue #15)', () 
       'tsconfig.json',
       'scripts/merge-openapi.mjs',
       'scripts/generate-ts-client.mjs',
+      'scripts/generate-dart-client.mjs',
       'src/types.ts',
       'src/client.ts',
       'src/index.ts',

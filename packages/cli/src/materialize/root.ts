@@ -86,6 +86,42 @@ function rootPnpmWorkspaceYaml(): string {
 }
 
 function rootTaskfileYml(composition: Composition): string {
+  // Flutter peer app (decision 4/23): the polyglot shapes' mobile. The
+  // Go branches below compose the same three tasks (dev/test/build).
+  const isFlutterOn = composition.mobile === 'flutter';
+  const isMicroservices = composition.topology === 'microservices';
+  const mobileDevTask = isFlutterOn
+    ? `
+  dev:mobile:
+    desc: Run the Flutter peer app on a device/emulator (decision 23; run \`flutter create . --platforms=android,ios\` once first)
+    dir: apps/mobile
+    cmds:
+      - flutter run --dart-define=API_URL=http://10.0.2.2:3000${isMicroservices ? ' --dart-define=AUTH_URL=http://10.0.2.2:3001' : ''}
+`
+    : '';
+  const mobileTestTask = isFlutterOn
+    ? `
+  test:mobile:
+    desc: Analyze + run the mobile auth smoke test (requires a running api for the live leg)
+    dir: apps/mobile
+    cmds:
+      - flutter analyze
+      - flutter test
+`
+    : '';
+  const mobileBuildTask = isFlutterOn
+    ? `
+  build:mobile:
+    desc: Analyze the Flutter mobile workspace (the compile check without a device)
+    dir: apps/mobile
+    cmds:
+      - flutter analyze
+`
+    : '';
+  const mobileTestLine = isFlutterOn ? '      - task: test:mobile\n' : '';
+  const mobileBuildLine = isFlutterOn ? '      - task: build:mobile\n' : '';
+  const mobileDevCommand = isFlutterOn ? ' & task dev:mobile' : '';
+
   if (composition.backend === 'go' && composition.topology === 'microservices' && composition.ai === 'on') {
     return `# Taskfile.yml — scaffolded orchestrator (shape 4: Go-microservices + Next.js web + AI on).
 #
@@ -297,9 +333,9 @@ tasks:
     silent: true
 
   dev:
-    desc: Boot the full stack (web + api + api-auth) in parallel
+    desc: Boot the full stack (web + api + api-auth${isFlutterOn ? ' + Flutter mobile' : ''}) in parallel
     cmds:
-      - 'task dev:web & task dev:api & task dev:api-auth & wait'
+      - 'task dev:web & task dev:api & task dev:api-auth${mobileDevCommand} & wait'
 
   dev:api:
     desc: "Boot the main api on http://localhost:3000 (OpenAPI: /openapi.json)"
@@ -318,6 +354,7 @@ tasks:
     dir: apps/web
     cmds:
       - pnpm dev
+${mobileDevTask}
 
   test:
     desc: Run all tests (unit + contract + the one E2E, decision 22)
@@ -325,7 +362,8 @@ tasks:
       - task go:test
       - task test:contract
       - task test:web
-      - task test:e2e
+${mobileTestLine}      - task test:e2e
+${mobileTestTask}
 
   go:test:
     desc: Go unit + contract tests for BOTH services. Repo/contract tests skip cleanly when DATABASE_URL is unset.
@@ -421,12 +459,13 @@ tasks:
     cmds:
       - task go:build
       - task build:web
-
+${mobileBuildLine}
   build:web:
     desc: Production-build the web (next build)
     dir: apps/web
     cmds:
       - pnpm build
+${mobileBuildTask}
 `;
   }
 
@@ -449,9 +488,9 @@ tasks:
     silent: true
 
   dev:
-    desc: Boot the full stack (Go api + Next web) in parallel
+    desc: Boot the full stack (Go api + Next web${isFlutterOn ? ' + Flutter mobile' : ''}) in parallel
     cmds:
-      - 'task dev:web & task dev:api & wait'
+      - 'task dev:web & task dev:api${mobileDevCommand} & wait'
 
   dev:api:
     desc: "Boot the api on http://localhost:3000 (OpenAPI: /openapi.json)"
@@ -464,6 +503,7 @@ tasks:
     dir: apps/web
     cmds:
       - pnpm dev
+${mobileDevTask}
 
   test:
     desc: Run all tests (unit + contract + the one E2E, decision 22)
@@ -471,7 +511,8 @@ tasks:
       - task go:test
       - task test:contract
       - task test:web
-      - task test:e2e
+${mobileTestLine}      - task test:e2e
+${mobileTestTask}
 
   go:test:
     desc: Go unit + contract tests. Repo/contract tests skip cleanly when DATABASE_URL is unset.
@@ -524,15 +565,17 @@ tasks:
     cmds:
       - task go:build
       - task build:web
-
+${mobileBuildLine}
   build:web:
     desc: Production-build the web (next build)
     dir: apps/web
     cmds:
       - pnpm build
+${mobileBuildTask}
 `;
   }
 
+  {
   const isMicroservices = composition.topology === 'microservices';
   const isMobileOn = composition.mobile === 'expo';
   const mobileDevTask = isMobileOn
@@ -818,6 +861,7 @@ ${mobileBuildLine}
       - pnpm build
 ${mobileBuildTask}
 `;
+  }
 }
 
 function rootGitignore(): string {
@@ -830,6 +874,13 @@ coverage/
 .env.local
 *.tsbuildinfo
 .DS_Store
+# Flutter / Dart artifacts (apps/mobile, the contract's Dart client)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+ios/Pods/
+ios/.symlinks/
 `;
 }
 
@@ -838,6 +889,52 @@ function rootReadme(name: string, composition: Composition): string {
   if (composition.backend === 'go' && composition.topology === 'microservices') {
 
     const isAi = composition.ai === 'on';
+
+    // Flutter peer app (decision 4/23): the mobile shares only the
+    // contract — the codegen'd Dart client in clients/dart.
+    const isFlutter = composition.mobile === 'flutter';
+    const mobileBoot = isFlutter
+      ? '\n\n`task dev` also boots the Flutter peer app (`apps/mobile`). Run it on an emulator/device with `task dev:mobile`, or `cd apps/mobile && flutter run` with `--dart-define` pointing at a host the device can reach (`http://10.0.2.2:3000` from the Android emulator, your LAN IP from a physical device).'
+      : '';
+    const mobileQuickstart = isFlutter
+      ? '\n\n**Flutter mobile** (decision 23): the peer app in `apps/mobile` stores auth tokens in `flutter_secure_storage`, attaches the access token as a Bearer header, and on a 401 calls `/auth/refresh` with the refresh token in the body, swaps the pair, and retries — no cookies on this path. It calls the auth service (api-auth, :3001) for login/refresh and the main api (:3000) for items, both through the codegen\'d Dart client.'
+      : '';
+    const mobileMermaid = isFlutter
+      ? `
+    subgraph "apps/mobile (Flutter)"
+        MM["login + items screens"]
+        DC["clients/dart<br/>(codegen'd Dart client)"]
+        SS["flutter_secure_storage"]
+    end
+    MM -->|typed call| DC
+    DC -->|Bearer items| RB
+    DC -->|login + body refresh| RA
+    DC -->|stores tokens| SS
+`
+      : '';
+    const mobileExtendBullet = isFlutter
+      ? `
+- **Add a mobile screen**: create it under \`apps/mobile/lib/src/screens/\` and
+  reach the backend through the \`MobileApi\` seam (\`lib/src/api.dart\`); keep
+  access and refresh tokens inside the \`flutter_secure_storage\` seam.`
+      : '';
+    const mobileTaskRows = isFlutter
+      ? `
+| \`task dev:mobile\` | Run the Flutter peer app on a device/emulator (decision 23) |
+| \`task test:mobile\` | Analyze + run the mobile auth smoke test (live API leg in CI) |
+| \`task build:mobile\` | Analyze the Flutter workspace (compile check without a device) |`
+      : '';
+    const mobileTestNote = isFlutter
+      ? `
+
+The mobile smoke test (\`apps/mobile/test/auth_flow_test.dart\`) runs the
+codegen'd Dart client + secure storage against a live API when
+\`MOBILE_SMOKE_API_URL\` is set. CI boots the services with a one-second
+access-token TTL so the test proves Bearer attachment, body refresh,
+secure-storage rotation, and retry without an emulator (decision 29's
+build-and-boot minimum for the blessed matrix).
+`
+      : '';
     const aiInstall = isAi
       ? `**AI on (issue #16)**: \`task dev\` also boots the Python/FastAPI AI
 service, so install its deps once before booting:
@@ -971,7 +1068,7 @@ task migrate
 task dev
 \`\`\`
 
-${aiInstall}${aiBoot}
+${aiInstall}${aiBoot}${mobileBoot}${mobileQuickstart}
 Next rewrites \`/api/auth/*\` to api-auth and \`/api/*\` to api, so the
 browser sees one same-origin endpoint and the httpOnly refresh cookie
 stays first-party.
@@ -1082,7 +1179,7 @@ graph LR
         ITEMS["internal/items<br/>typed ItemsRepo"]${aiMermaidApi}
         JWKS["internal/jwks<br/>fetch + cache + verify locally"]
         DB2["Postgres (pgx)<br/>items"]
-    end${aiMermaidSubgraph}
+    end${aiMermaidSubgraph}${mobileMermaid}
     subgraph "packages/contract (the only package)"
         YAML["openapi.yaml<br/>merged from the two Go partials, committed"]${aiMermaidContract}
         TS["src/ — generated TS client"]
@@ -1124,7 +1221,7 @@ The scaffold ships honest seams — each is a documented extension point:
   \`apps/web/src/lib/client.ts\` for client components).
 - **Wire a fence from the auth shim** (email-verify, password reset,
   MFA, OAuth, RBAC): the auth shim's scope is fixed by decision 12 —
-  fenced capabilities land in \`apps/api-auth\`'s route handlers.${aiExtendBullet}
+  fenced capabilities land in \`apps/api-auth\`'s route handlers.${aiExtendBullet}${mobileExtendBullet}
 
 ## How to grow
 
@@ -1152,7 +1249,7 @@ don't refactor:
 | \`task test:web\` | Web unit tests (the api-client's decision-16 auth properties) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task migrate\` | Apply pending DB migrations in both services |
-| \`task contract:generate\` | ${aiContractGenerateLine} |${aiTaskRows}
+| \`task contract:generate\` | ${aiContractGenerateLine} |${aiTaskRows}${mobileTaskRows}
 | \`task build\` | Build all workspaces (both Go services + web) |
 
 ## Tests — unit + contract + the one E2E (decision 22)
@@ -1168,7 +1265,7 @@ The scaffold ships three test levels:
 - **Contract** — each Go service's \`contract_test.go\` validates its
   committed partial spec (\`openapi.api.yaml\` / \`openapi.auth.yaml\`)
   against its live server (spec equality + schema-checked route flows);
-  ${aiContractTestMention}${aiTestMention}
+  ${aiContractTestMention}${aiTestMention}${mobileTestNote}
 - **E2E** — exactly one (\`e2e/items-flow.spec.ts\`, decision 22): a real
   browser drives register → login → list → create → reload on the Next
   web against the real api-auth + api + Postgres — the composition
@@ -1178,6 +1275,52 @@ The scaffold ships three test levels:
   }
 
   if (composition.backend === 'go') {
+    // Flutter peer app (decision 4/23): the mobile shares only the
+    // contract — the codegen'd Dart client in clients/dart.
+    const isFlutter = composition.mobile === 'flutter';
+    const mobileBoot = isFlutter
+      ? '\n\n`task dev` also boots the Flutter peer app (`apps/mobile`). Run it on an emulator/device with `task dev:mobile`, or `cd apps/mobile && flutter run` with `--dart-define` pointing at a host the device can reach (`http://10.0.2.2:3000` from the Android emulator, your LAN IP from a physical device).'
+      : '';
+    const mobileQuickstart = isFlutter
+      ? '\n\n**Flutter mobile** (decision 23): the peer app in `apps/mobile` stores auth tokens in `flutter_secure_storage`, attaches the access token as a Bearer header, and on a 401 calls `/auth/refresh` with the refresh token in the body, swaps the pair, and retries — no cookies on this path. It calls the api for login/refresh and items through the codegen\'d Dart client.'
+      : '';
+    const mobileMermaid = isFlutter
+      ? `
+    subgraph "apps/mobile (Flutter)"
+        MM["login + items screens"]
+        DC["clients/dart<br/>(codegen'd Dart client)"]
+        SS["flutter_secure_storage"]
+    end
+    MM -->|typed call| DC
+    DC -->|Bearer items| R
+    DC -->|login + body refresh| R
+    DC -->|stores tokens| SS
+`
+      : '';
+    const mobileExtendBullet = isFlutter
+      ? `
+- **Add a mobile screen**: create it under \`apps/mobile/lib/src/screens/\` and
+  reach the backend through the \`MobileApi\` seam (\`lib/src/api.dart\`); keep
+  access and refresh tokens inside the \`flutter_secure_storage\` seam.`
+      : '';
+    const mobileTaskRows = isFlutter
+      ? `
+| \`task dev:mobile\` | Run the Flutter peer app on a device/emulator (decision 23) |
+| \`task test:mobile\` | Analyze + run the mobile auth smoke test (live API leg in CI) |
+| \`task build:mobile\` | Analyze the Flutter workspace (compile check without a device) |`
+      : '';
+    const mobileTestNote = isFlutter
+      ? `
+
+The mobile smoke test (\`apps/mobile/test/auth_flow_test.dart\`) runs the
+codegen'd Dart client + secure storage against a live API when
+\`MOBILE_SMOKE_API_URL\` is set. CI boots the api with a one-second
+access-token TTL so the test proves Bearer attachment, body refresh,
+secure-storage rotation, and retry without an emulator (decision 29's
+build-and-boot minimum for the blessed matrix).
+`
+      : '';
+
     return `# ${name}
 
 A fullstack monorepo scaffolded from
@@ -1211,7 +1354,7 @@ task dev
 http://localhost:3000, OpenAPI served at \`/openapi.json\`) and
 \`apps/web\` (Next.js on http://localhost:5173). Next rewrites \`/api\` to
 the api, so the browser sees one same-origin endpoint and the httpOnly
-refresh cookie stays first-party.
+refresh cookie stays first-party.${mobileBoot}${mobileQuickstart}
 
 Open http://localhost:5173, click **Sign in**, register an account, and
 you land on the items page. Create an item; it appears in the list.
@@ -1307,7 +1450,7 @@ graph LR
         ITEMS["internal/items<br/>typed ItemsRepo"]
         DB1["Postgres (pgx)"]
     end
-    subgraph "packages/contract (the only package)"
+${mobileMermaid}    subgraph "packages/contract (the only package)"
         YAML["openapi.yaml<br/>generated from Go structs, committed"]
         TS["src/ — generated TS client"]
         DART["clients/dart/ — Dart client (Flutter, ticket 17)"]
@@ -1343,7 +1486,7 @@ The scaffold ships honest seams — each is a documented extension point:
   \`apps/web/src/lib/client.ts\` for client components).
 - **Wire a fence from the auth shim** (email-verify, password reset,
   MFA, OAuth, RBAC): the auth shim's scope is fixed by decision 12 —
-  fenced capabilities land in the module's route handlers.
+  fenced capabilities land in the module's route handlers.${mobileExtendBullet}
 
 ## How to grow
 
@@ -1371,7 +1514,7 @@ don't refactor:
 | \`task test:web\` | Web unit tests (the api-client's decision-16 auth properties) |
 | \`task test:e2e\` | Run just the one E2E (the items flow; needs \`DATABASE_URL\` + \`task migrate\`; skips cleanly if \`DATABASE_URL\` is unset) |
 | \`task migrate\` | Apply pending DB migrations (the Go migration runner) |
-| \`task contract:generate\` | Regenerate \`openapi.yaml\` from the Go structs + regenerate the TS client (commit the diff) |
+| \`task contract:generate\` | Regenerate \`openapi.yaml\` from the Go structs + regenerate the TS client (commit the diff) |${mobileTaskRows}
 | \`task build\` | Build all workspaces (api + web) |
 
 ## Tests — unit + contract + the one E2E (decision 22)
@@ -1385,7 +1528,7 @@ The scaffold ships three test levels:
 - **Contract** — \`apps/api/contract_test.go\` validates the committed
   \`packages/contract/openapi.yaml\` against the running server
   (spec equality + schema-checked route flows); the contract package's
-  own test proves the committed TS client equals the generator's output.
+  own test proves the committed TS client equals the generator's output.${mobileTestNote}
 - **E2E** — exactly one (\`e2e/items-flow.spec.ts\`, decision 22): a real
   browser drives register → login → list → create → reload on the Next
   web against the real Go api and Postgres. Per-feature E2Es are your

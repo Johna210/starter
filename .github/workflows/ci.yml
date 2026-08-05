@@ -29,6 +29,12 @@
 # Expo is part of the blessed TS surface: the mobile workspace is
 # typechecked, and a separate smoke step boots the API and exercises the
 # secure-storage + Bearer + body-refresh flow without an emulator.
+# Per issue 19 (ticket 17), the GO rows materialize the Flutter peer
+# app (decision 29: mobile on for the blessed matrix — Expo for TS
+# shapes, Flutter for Go shapes). Flutter is installed via
+# subosito/flutter-action, and a build-and-boot smoke step boots the Go
+# services and runs the mobile auth flow (flutter analyze + flutter
+# test against the live api; ACCESS_TOKEN_TTL=1 forces a real 401).
 #
 # Per decision 22 the test pyramid is unit + contract + one E2E
 # over items. The starter repo's own tests (contract.sh + vitest)
@@ -58,7 +64,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -171,6 +177,18 @@ jobs:
           go-version: 1.25.x
           cache: true
 
+      # ── Flutter (Go shapes, issue 19) ────────────────────────────
+      # The blessed Go rows materialize the Flutter peer app and run
+      # its build-and-boot smoke test (decision 29). The SDK + pub
+      # cache are keyed on the Flutter version, so the first Go row
+      # downloads it and the second reuses it.
+      - name: Setup Flutter (Go shapes)
+        if: matrix.backend == 'go' && matrix.ai != 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
       - name: Install Taskfile
         run: |
           curl -sS https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
@@ -265,6 +283,69 @@ jobs:
           pnpm --filter @starter/contract typecheck
           pnpm --filter @starter/web typecheck
         working-directory: /tmp/test-project
+
+      # ── Flutter mobile smoke test (Go shapes, issue 19) ──────────
+      # Decision 29's build-and-boot minimum for the blessed matrix:
+      # flutter analyze compiles the workspace; then the real auth flow
+      # (secure storage + Bearer + body-refresh) runs against the booted
+      # Go services in the Dart VM. ACCESS_TOKEN_TTL=1 forces a real
+      # 401 so body refresh + token rotation are exercised, no emulator.
+      - name: Scaffolded project — Flutter mobile auth smoke test
+        if: matrix.backend == 'go' && matrix.ai != 'true'
+        run: |
+          API_PID=''
+          AUTH_PID=''
+          cleanup() {
+            if [ -n "$API_PID" ]; then kill -TERM -- "-$API_PID" 2>/dev/null || true; fi
+            if [ -n "$AUTH_PID" ]; then kill -TERM -- "-$AUTH_PID" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
+          setsid task dev:api >/tmp/flutter-api.log 2>&1 &
+          API_PID=$!
+          if [ "${{ matrix.shape }}" = "go-microservices" ]; then
+            setsid task dev:api-auth >/tmp/flutter-api-auth.log 2>&1 &
+            AUTH_PID=$!
+          fi
+          READY=0
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:3000/openapi.json >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then
+            exit 1
+          fi
+          if [ "${{ matrix.shape }}" = "go-microservices" ]; then
+            READY_AUTH=0
+            for i in $(seq 1 90); do
+              if curl -fsS http://localhost:3001/openapi.json >/dev/null 2>&1; then
+                READY_AUTH=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$READY_AUTH" -ne 1 ]; then
+              exit 1
+            fi
+          fi
+          flutter pub get
+          flutter analyze
+          # The auth URL is only passed for the microservices shape
+          # (auth lives on apps/api-auth, :3001); the monolith serves
+          # /auth on the api itself, so the test falls back to the api URL.
+          DART_DEFINES="--dart-define=MOBILE_SMOKE_API_URL=http://localhost:3000 --dart-define=ACCESS_TOKEN_TTL=1"
+          if [ "${{ matrix.shape }}" = "go-microservices" ]; then
+            DART_DEFINES="$DART_DEFINES --dart-define=MOBILE_SMOKE_AUTH_URL=http://localhost:3001"
+          fi
+          # shellcheck disable=SC2086
+          flutter test $DART_DEFINES
+        working-directory: /tmp/test-project/apps/mobile
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          JWT_SIGNING_KEY: ${{ env.JWT_SIGNING_KEY }}
+          ACCESS_TOKEN_TTL: '1'
 
       # ── Expo mobile smoke test (TS shapes, issue 18) ─────────────
       # The native app cannot run in an ubuntu CI job without an emulator,

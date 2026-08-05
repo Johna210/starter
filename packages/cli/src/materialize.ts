@@ -16,7 +16,9 @@ import {
   describeComposition,
   isGoMicroservicesNext,
   isGoMicroservicesNextAi,
+  isGoMicroservicesNextFlutter,
   isGoMonolithNext,
+  isGoMonolithNextFlutter,
   isImplemented,
   isTsMicroservicesVite,
   isTsMicroservicesViteExpo,
@@ -47,13 +49,14 @@ import { writeGoContractMsAi } from './materialize/go-contract-ms-ai.js';
 import { writeAi } from './materialize/ai.js';
 import { writeNextWeb } from './materialize/web-next.js';
 import { writeMobile } from './materialize/mobile.js';
+import { writeFlutterMobile } from './materialize/flutter-mobile.js';
 
 export class UnimplementedCompositionError extends Error {
   public readonly composition: Composition;
   constructor(composition: Composition) {
     super(`Composition not yet implemented: ${describeComposition(composition)}.\n` +
-      `This combination is outside the currently materialized TS, Go, and Expo ` +
-      `shapes. Please choose another combination.`);
+      `This combination is outside the currently materialized TS, Go, Expo, and ` +
+      `Flutter shapes. Please choose another combination.`);
     this.name = 'UnimplementedCompositionError';
     this.composition = composition;
   }
@@ -66,9 +69,9 @@ export async function materialize(ctx: ProjectContext, composition: Composition)
   }
   if (isGoMicroservicesNextAi(composition)) {
     await writeGoMicroservicesNextAi(ctx, composition);
-  } else if (isGoMicroservicesNext(composition)) {
+  } else if (isGoMicroservicesNext(composition) || isGoMicroservicesNextFlutter(composition)) {
     await writeGoMicroservicesNext(ctx, composition);
-  } else if (isGoMonolithNext(composition)) {
+  } else if (isGoMonolithNext(composition) || isGoMonolithNextFlutter(composition)) {
     await writeGoMonolithBase(ctx, composition);
   } else if (isTsMicroservicesVite(composition) || isTsMicroservicesViteExpo(composition)) {
     await writeTsMicroservicesVite(ctx, composition);
@@ -99,6 +102,9 @@ async function writeGoMicroservicesNext(ctx: ProjectContext, composition: Compos
   await writeGoApiAuthService(ctx);
   await writeGoContractMs(ctx);
   await writeNextWeb(ctx, composition);
+  if (composition.mobile === 'flutter') {
+    await writeFlutterMobile(ctx, composition);
+  }
   await writeE2e(ctx, composition);
 }
 
@@ -107,6 +113,9 @@ async function writeGoMonolithBase(ctx: ProjectContext, composition: Composition
   await writeGoApi(ctx);
   await writeGoContract(ctx);
   await writeNextWeb(ctx, composition);
+  if (composition.mobile === 'flutter') {
+    await writeFlutterMobile(ctx, composition);
+  }
   await writeE2e(ctx, composition);
 }
 

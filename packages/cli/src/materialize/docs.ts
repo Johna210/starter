@@ -6,12 +6,13 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
   const { targetDir } = ctx;
   const isTs = composition.backend === 'ts';
   const isMicroservices = composition.topology === 'microservices';
-  const isMobileOn = composition.mobile === 'expo';
+  const isMobileOn = composition.mobile !== 'none';
+  const mobileVariant = composition.mobile === 'flutter' ? 'flutter' : 'expo';
   const isAiOn = composition.ai === 'on';
 
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/contract-spine.md'),
-    isTs ? contractSpineTsMd(isMicroservices, isMobileOn) : contractSpineGoMd(),
+    isTs ? contractSpineTsMd(isMicroservices, isMobileOn) : contractSpineGoMd(isMobileOn, mobileVariant),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/modular-monolith.md'),
@@ -19,7 +20,7 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/auth-subtree.md'),
-    authSubtreeMd(isMicroservices, isMobileOn),
+    authSubtreeMd(isMicroservices, isMobileOn, mobileVariant),
   );
   await writeFileRecursive(
     join(targetDir, 'docs/architecture/typed-rpc-transport.md'),
@@ -40,7 +41,7 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
   if (isMobileOn) {
     await writeFileRecursive(
       join(targetDir, 'docs/architecture/mobile-auth-flow.md'),
-      mobileAuthFlowMd(isMicroservices),
+      mobileAuthFlowMd(isMicroservices, mobileVariant),
     );
   }
 }
@@ -331,7 +332,12 @@ no codegen, no separate source of truth.
 `;
 }
 
-function contractSpineGoMd(): string {
+function contractSpineGoMd(isMobileOn = false, mobileVariant: 'expo' | 'flutter' = 'expo'): string {
+  const mobileNote = isMobileOn
+    ? mobileVariant === 'flutter'
+      ? '\n\nThe Flutter peer app in apps/mobile consumes the **codegen\'d Dart client** (clients/dart/ — the mobile shares *only* the contract, decision 4): it calls the api directly, stores auth tokens through flutter_secure_storage, and never imports a TS package.'
+      : ''
+    : '';
   return `# Your OpenAPI contract spine
 
 This is your contract spine: the single API agreement between \`apps/web\`
@@ -347,7 +353,7 @@ input/output structs on Gin routes; Huma validates at runtime and
 
 The OpenAPI file is **generated from the Go api's structs** during build
 and **committed** to the repo — not hand-authored. TS/Dart clients are
-then generated from the committed file.
+then generated from the committed file.${mobileNote}
 
 ## Diagram
 
@@ -532,9 +538,11 @@ graph LR
 `;
 }
 
-function authSubtreeMd(isMicroservices: boolean, isMobileOn = false): string {
+function authSubtreeMd(isMicroservices: boolean, isMobileOn = false, mobileVariant: 'expo' | 'flutter' = 'expo'): string {
+  const storage = mobileVariant === 'flutter' ? 'flutter_secure_storage' : 'expo-secure-store';
+  const appLabel = mobileVariant === 'flutter' ? 'Flutter' : 'Expo';
   const mobileSection = isMobileOn
-    ? '\n\n## Mobile-auth flow (decision 23)\n\nThe Expo peer app uses platform-native secure storage rather than cookies. Login and register return both tokens in the response body; apps/mobile stores them in expo-secure-store, attaches the access token as a Bearer header, and sends the refresh token in the body of POST /auth/refresh after a 401. The rotated pair replaces both secure-storage entries before the original request is retried.\n'
+    ? `\n\n## Mobile-auth flow (decision 23)\n\nThe ${appLabel} peer app uses platform-native secure storage rather than cookies. Login and register return both tokens in the response body; apps/mobile stores them in ${storage}, attaches the access token as a Bearer header, and sends the refresh token in the body of POST /auth/refresh after a 401. The rotated pair replaces both secure-storage entries before the original request is retried.\n`
     : '';
   if (isMicroservices) {
     return `# The auth subtree (TS-microservices)
@@ -689,33 +697,42 @@ standard, accepted JWT tradeoff.
 `;
 }
 
-function mobileAuthFlowMd(isMicroservices: boolean): string {
+function mobileAuthFlowMd(isMicroservices: boolean, mobileVariant: 'expo' | 'flutter' = 'expo'): string {
   const authService = isMicroservices ? 'apps/api-auth' : 'apps/api';
-  const authBase = isMicroservices ? 'EXPO_PUBLIC_AUTH_URL' : 'EXPO_PUBLIC_API_URL';
-  return `# Mobile auth flow (Expo)
+  const appLabel = mobileVariant === 'flutter' ? 'Flutter' : 'Expo';
+  const storage = mobileVariant === 'flutter' ? 'flutter_secure_storage' : 'expo-secure-store';
+  const envVars = mobileVariant === 'flutter'
+    ? (isMicroservices
+        ? 'API_URL / AUTH_URL (--dart-define, defaults http://localhost:3000 / http://localhost:3001)'
+        : 'API_URL (--dart-define, defaults to http://localhost:3000)')
+    : (isMicroservices ? 'EXPO_PUBLIC_API_URL + EXPO_PUBLIC_AUTH_URL' : 'EXPO_PUBLIC_API_URL');
+  const client = mobileVariant === 'flutter'
+    ? 'the codegen\'d Dart client (packages/contract/clients/dart)'
+    : 'the same typed Hono RPC client as apps/web';
+  return `# Mobile auth flow (${appLabel})
 
 The mobile app is a peer client, not a web shell with cookies bolted on.
-It uses the same typed Hono RPC client as apps/web, but its token storage
+It uses ${client}, but its token storage
 and refresh transport follow decision 23:
 
 1. POST /auth/login returns both access and refresh tokens in the body.
-2. apps/mobile stores both values in expo-secure-store.
+2. apps/mobile stores both values in ${storage}.
 3. Every protected request carries Authorization: Bearer <access>.
 4. A 401 reads the refresh token from secure storage and POSTs it to
    /auth/refresh in a JSON body, never in a cookie.
 5. The rotated pair replaces both secure-storage values and the original
    request is retried once.
 
-The auth base URL is ${authBase}. In this shape, ${authService} owns the
+The auth base URL is configured via ${envVars}. In this shape, ${authService} owns the
 four auth endpoints and is the sole token minter. The items API remains the
-typed api-client's other base URL in the microservices shape.
+other base URL in the microservices shape.
 
 ## Sequence
 
 \`\`\`mermaid
 sequenceDiagram
-    participant Mobile as apps/mobile (Expo)
-    participant Store as expo-secure-store
+    participant Mobile as apps/mobile (${appLabel})
+    participant Store as ${storage}
     participant Auth as ${authService}
     participant API as apps/api
 
@@ -732,9 +749,10 @@ sequenceDiagram
     API-->>Mobile: items
 \`\`\`
 
-Native builds and Expo Go need a host address reachable from the device.
-Use http://10.0.2.2:3000 from the Android emulator, localhost from the
-iOS simulator, or the development machine's LAN IP from a physical device.
+Native builds and a device/emulator need a host address reachable from the
+runtime. Use http://10.0.2.2:3000 from the Android emulator, localhost from
+the iOS simulator, or the development machine's LAN IP from a physical
+device.
 `;
 }
 

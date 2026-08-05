@@ -96,6 +96,24 @@ export const GO_MONOLITH_NEXT: Composition = {
   ai: 'off',
 };
 
+/** Shape 3 + Flutter mobile (issue #19 / ticket 17).
+ *
+ * Decision 4: mobile defaults to Flutter in polyglot shapes (the
+ * moment a non-TS language enters the build, mobile shares only the
+ * contract — never TS packages). The Flutter peer app consumes the
+ * codegen'd Dart client from packages/contract (decision 19), and
+ * authenticates with secure storage + Bearer + body-refresh
+ * (decision 23). This IS part of the blessed matrix (decision 29:
+ * web + mobile tested; the Go rows materialize with Flutter).
+ */
+export const GO_MONOLITH_NEXT_FLUTTER: Composition = {
+  backend: 'go',
+  topology: 'monolith',
+  web: 'next',
+  mobile: 'flutter',
+  ai: 'off',
+};
+
 /**
  * Shape 4: Go-microservices + Next, AI off (issue #15).
  *
@@ -111,6 +129,23 @@ export const GO_MICROSERVICES_NEXT: Composition = {
   topology: 'microservices',
   web: 'next',
   mobile: 'none',
+  ai: 'off',
+};
+
+/** Shape 4 + Flutter mobile (issue #19 / ticket 17).
+ *
+ * Decision 4: Flutter is the mobile default in polyglot shapes. The
+ * peer app consumes the codegen'd Dart client from packages/contract
+ * (decision 19) — with TWO base URLs: the auth endpoints hit
+ * apps/api-auth (the sole minter, port 3001) and the items API hits
+ * apps/api (port 3000). Auth is secure storage + Bearer + body-refresh
+ * (decision 23). This IS part of the blessed matrix (decision 29).
+ */
+export const GO_MICROSERVICES_NEXT_FLUTTER: Composition = {
+  backend: 'go',
+  topology: 'microservices',
+  web: 'next',
+  mobile: 'flutter',
   ai: 'off',
 };
 
@@ -142,7 +177,9 @@ export function isImplemented(c: Composition): boolean {
     isTsMonolithViteExpo(c) ||
     isTsMicroservicesViteExpo(c) ||
     isGoMonolithNext(c) ||
+    isGoMonolithNextFlutter(c) ||
     isGoMicroservicesNext(c) ||
+    isGoMicroservicesNextFlutter(c) ||
     isGoMicroservicesNextAi(c)
   );
 }
@@ -208,6 +245,16 @@ export function isGoMonolithNext(c: Composition): boolean {
   );
 }
 
+export function isGoMonolithNextFlutter(c: Composition): boolean {
+  return (
+    c.backend === GO_MONOLITH_NEXT_FLUTTER.backend &&
+    c.topology === GO_MONOLITH_NEXT_FLUTTER.topology &&
+    c.web === GO_MONOLITH_NEXT_FLUTTER.web &&
+    c.mobile === GO_MONOLITH_NEXT_FLUTTER.mobile &&
+    c.ai === GO_MONOLITH_NEXT_FLUTTER.ai
+  );
+}
+
 export function isGoMicroservicesNext(c: Composition): boolean {
   return (
     c.backend === GO_MICROSERVICES_NEXT.backend &&
@@ -215,6 +262,16 @@ export function isGoMicroservicesNext(c: Composition): boolean {
     c.web === GO_MICROSERVICES_NEXT.web &&
     c.mobile === GO_MICROSERVICES_NEXT.mobile &&
     c.ai === GO_MICROSERVICES_NEXT.ai
+  );
+}
+
+export function isGoMicroservicesNextFlutter(c: Composition): boolean {
+  return (
+    c.backend === GO_MICROSERVICES_NEXT_FLUTTER.backend &&
+    c.topology === GO_MICROSERVICES_NEXT_FLUTTER.topology &&
+    c.web === GO_MICROSERVICES_NEXT_FLUTTER.web &&
+    c.mobile === GO_MICROSERVICES_NEXT_FLUTTER.mobile &&
+    c.ai === GO_MICROSERVICES_NEXT_FLUTTER.ai
   );
 }
 
