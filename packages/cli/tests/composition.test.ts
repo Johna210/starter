@@ -4,7 +4,9 @@ import {
   describeComposition,
   GO_MICROSERVICES_NEXT,
   GO_MICROSERVICES_NEXT_AI,
+  GO_MICROSERVICES_NEXT_FLUTTER,
   GO_MONOLITH_NEXT,
+  GO_MONOLITH_NEXT_FLUTTER,
   isImplemented,
   TS_MONOLITH_VITE,
   TS_MICROSERVICES_VITE_EXPO,
@@ -45,7 +47,12 @@ describe('composition', () => {
       expect(isImplemented(TS_MICROSERVICES_VITE_EXPO)).toBe(true);
     });
 
-    it('returns false for Flutter until the polyglot mobile ticket lands', () => {
+    it('returns true for the Go + Flutter compositions (polyglot mobile, issue #19)', () => {
+      expect(isImplemented(GO_MONOLITH_NEXT_FLUTTER)).toBe(true);
+      expect(isImplemented(GO_MICROSERVICES_NEXT_FLUTTER)).toBe(true);
+    });
+
+    it('returns false for Flutter on a TS shape (decision 4: Flutter is the polyglot mobile)', () => {
       const c: Composition = { ...TS_MONOLITH_VITE, mobile: 'flutter' };
       expect(isImplemented(c)).toBe(false);
     });
