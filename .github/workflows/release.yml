@@ -1,0 +1,135 @@
+# Release pipeline — tag-based, CI-gated, npm publish.
+#
+# Decisions 35/37/38: releases are deliberate acts. A maintainer cuts a
+# `vX.Y.Z` tag on master when a meaningful set of changes is ready; the
+# CI matrix (decision 29) must be green for the tagged commit; the tag
+# triggers an npm publish of the CLI. The CLI version and the tag share
+# a version (decision 35) — enforced here, not assumed.
+#
+# The gate is deliberately strict and fails with a message explaining
+# why, so a broken release can never silently happen:
+#
+#   1. CI gate   — the tagged commit's most recent CI workflow run must
+#      be completed and success. A tag can't be cut on a broken matrix
+#      (decision 37: "a release that doesn't pass the CI matrix breaks
+#      the blessed-2×2 envelope"). This is the "refuses to publish if
+#      green is not the latest state on the tagged commit" enforcement.
+#   2. Version gate — the tag must be semver, must equal
+#      packages/cli/package.json's version, and CHANGELOG.md must carry
+#      a matching entry (decision 38's two-artifact release notes).
+#
+# Only then does the publish job run: build + `pnpm publish` with the
+# NPM_TOKEN secret, then a registry round-trip verifying the published
+# version matches the tag.
+#
+# The playbook for maintainers lives in docs/contributing/release.md —
+# "how to cut a release" (decision 34). Pre-1.0 (0.x) and post-1.0 use
+# the same pipeline; only the version-numbering rules differ (decision
+# 35: 0.x bumps every release, 1.0+ follows SemVer).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Release gates (CI green + version sync)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CI gate — the tagged commit's CI matrix must be green
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN="$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}&per_page=1" --jq '.workflow_runs[0] // empty')"
+          if [ -z "$RUN" ]; then
+            echo "::error::No CI workflow run found for commit ${{ github.sha }}. A tag can only be cut on a commit with a green CI matrix (decision 37) — push the code to master first and wait for CI to finish."
+            exit 1
+          fi
+          STATUS="$(echo "$RUN" | jq -r '.status')"
+          CONCLUSION="$(echo "$RUN" | jq -r '.conclusion')"
+          if [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "success" ]; then
+            echo "::error::CI gate failed: latest CI run for ${{ github.sha }} is status=$STATUS conclusion=$CONCLUSION. A tag can only be cut on a green CI matrix (decision 37)."
+            exit 1
+          fi
+          echo "CI gate passed: CI workflow run $(echo "$RUN" | jq -r '.id') is success for ${{ github.sha }}"
+
+      - name: Version gate — tag, package.json, and CHANGELOG must agree
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "$TAG_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '$GITHUB_REF_NAME' is not semver. Use vX.Y.Z (e.g. v0.1.0)."
+            exit 1
+          fi
+          PKG_VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Version sync failed: tag is v$TAG_VERSION but packages/cli/package.json is $PKG_VERSION. The CLI and the tag share a version (decision 35) — bump package.json first, commit, then tag."
+            exit 1
+          fi
+          if ! grep -qF "## [${TAG_VERSION}]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '[${TAG_VERSION}]' entry. Add one (decision 38: the CHANGELOG is the 'should I upgrade?' signal) and commit it before tagging."
+            exit 1
+          fi
+          echo "Version gate passed: tag v$TAG_VERSION == package.json == CHANGELOG entry"
+
+  publish:
+    name: Publish create-fs-starter to npm
+    needs: [gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Check NPM_TOKEN is configured
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured. Add it under Settings → Secrets and variables → Actions before cutting a release."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the CLI
+        run: pnpm --filter create-fs-starter build
+
+      - name: Publish to npm
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter create-fs-starter publish --no-git-checks --access public
+
+      - name: Verify the published version on the registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PUBLISHED="$(npm view "create-fs-starter@${TAG_VERSION}" version 2>/dev/null || true)"
+          if [ -z "$PUBLISHED" ] || [ "$PUBLISHED" != "$TAG_VERSION" ]; then
+            echo "::error::Published version check failed: expected $TAG_VERSION on npm, got '${PUBLISHED:-nothing}'. The tag is green but the publish did not land — investigate before re-tagging."
+            exit 1
+          fi
+          echo "Published create-fs-starter@$TAG_VERSION — npx create-fs-starter@$TAG_VERSION now resolves to it."
