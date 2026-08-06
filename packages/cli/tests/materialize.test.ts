@@ -937,6 +937,34 @@ describe('materialize', () => {
       expect(pkg.name).toBe('my-cool-app');
     });
 
+    it('stamps starterVersion into the root package.json (decision 38)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const pkg = JSON.parse(await readFile(join(targetDir, 'package.json'), 'utf8'));
+      // The lookup key for post-1.0 migration notes — must equal the
+      // CLI's own version (single source, decision 35).
+      const { VERSION } = await import('../src/version.js');
+      expect(pkg.starterVersion).toBe(VERSION);
+    });
+
+    it('ships a CHANGELOG.md keyed to the generating Starter version (decision 38)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      const cl = await readFile(join(targetDir, 'CHANGELOG.md'), 'utf8');
+      const { VERSION } = await import('../src/version.js');
+      expect(cl).toContain(`## [${VERSION}]`);
+      expect(cl).toContain('Scaffolded from create-fs-starter');
+    });
+
+    it('ships the docs/migrations convention but no migration notes pre-1.0 (decision 38)', async () => {
+      await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
+      // The convention README exists (the mechanism is in place)…
+      const readme = await readFile(join(targetDir, 'docs/migrations/README.md'), 'utf8');
+      expect(readme).toContain('pre-1.0');
+      // …but no v*-to-v* recipes: pre-1.0 every change is breaking
+      // (decision 35) — CHANGELOG only, no migration notes.
+      const entries = await readdir(join(targetDir, 'docs/migrations'));
+      expect(entries).toEqual(['README.md']);
+    });
+
     it('declares pnpm workspaces in the root pnpm-workspace.yaml', async () => {
       await materialize({ targetDir, name: 'test-app' }, TS_MONOLITH_VITE);
       const ws = await readFile(join(targetDir, 'pnpm-workspace.yaml'), 'utf8');
