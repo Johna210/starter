@@ -17,6 +17,7 @@ import {
 } from './composition.js';
 import { materialize, UnimplementedCompositionError } from './materialize.js';
 import { DEFAULT_ANSWERS, type PromptAnswers } from './prompts.js';
+import { VERSION } from './version.js';
 
 export interface RunCliOptions {
   /** Override the interactive prompts (used by tests and --yes flag). */
@@ -34,8 +35,6 @@ export type PromptFn = typeof defaultPrompt;
 export type CliResult =
   | { ok: true; composition: Composition; targetDir: string; dryRun: boolean; warnings: string[] }
   | { ok: false; reason: 'usage' | 'cancel' | 'unimplemented' | 'error'; message: string; exitCode: number };
-
-export const VERSION = '0.1.0';
 
 const USAGE = 'Usage: create-fs-starter <project-name> [--yes] [--dry-run]';
 
