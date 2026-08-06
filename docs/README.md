@@ -22,8 +22,8 @@ asymmetry).
 
 ## The contribution playbook (`contributing/`)
 
-Six entries — how to add a new X to the five-axis composition
-(decision 24):
+Seven entries — how to add a new X to the five-axis composition
+(decision 24), plus how to cut a release (decision 34):
 
 - [Add a new web variant](contributing/web-variant.md) (decision 15)
 - [Add a new api framework](contributing/api-framework.md) (decision 18)
@@ -31,6 +31,7 @@ Six entries — how to add a new X to the five-axis composition
 - [Add a new fence](contributing/fence.md) (decision 12)
 - [Bump the contract mechanism](contributing/contract-mechanism.md) (decisions 17/19)
 - [Add a new blessed combination](contributing/blessed-combination.md) (decisions 7/24/29)
+- [Cut a release](contributing/release.md) (decisions 35/37/38)
 
 ## The domain subdirs in one line
 
