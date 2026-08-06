@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { type Composition } from '../composition.js';
+import { VERSION } from '../version.js';
 import { type ProjectContext, writeFileRecursive } from './_shared.js';
 
 export async function writeRoot(ctx: ProjectContext, composition: Composition): Promise<void> {
@@ -10,6 +11,35 @@ export async function writeRoot(ctx: ProjectContext, composition: Composition): 
   await writeFileRecursive(join(targetDir, 'Taskfile.yml'), rootTaskfileYml(composition));
   await writeFileRecursive(join(targetDir, '.gitignore'), rootGitignore());
   await writeFileRecursive(join(targetDir, 'README.md'), rootReadme(name, composition));
+  // Decision 38: the two-artifact release notes are mirrored into the
+  // scaffolded project. Pre-1.0 (decision 35) that means the CHANGELOG
+  // only — no migration notes; docs/migrations/ is written by
+  // writeDocs (the post-1.0 mechanism, currently an empty lookup).
+  await writeFileRecursive(join(targetDir, 'CHANGELOG.md'), rootChangelog());
+}
+
+function rootChangelog(): string {
+  // Decision 38: the scaffolded project carries a CHANGELOG keyed to the
+  // Starter version that generated it ("should I upgrade?" for Starter
+  // releases). Pre-1.0 there are no migration notes — every change is
+  // breaking (decision 35) and re-scaffolding is the upgrade path.
+  return `# Changelog
+
+All notable changes to this project are recorded here, keyed to the
+[create-fs-starter](https://github.com/Johna210/starter) version that
+generated each state (decision 38 — the scaffolded project mirrors the
+Starter's two-artifact release notes).
+
+## [${VERSION}]
+
+Scaffolded from create-fs-starter v${VERSION} (\`starterVersion\` ${VERSION}).
+
+This project is **pre-1.0**: every Starter change is breaking and the
+expected upgrade path is to re-scaffold. See the
+[Starter's CHANGELOG](https://github.com/Johna210/starter/blob/master/CHANGELOG.md)
+for what changed in each Starter version. Post-1.0 breaking changes
+add migration notes under \`docs/migrations/\` (\`vX-to-vY.md\` recipes).
+`;
 }
 
 function rootPackageJson(name: string, composition: Composition): string {
@@ -22,6 +52,10 @@ function rootPackageJson(name: string, composition: Composition): string {
       {
         name,
         version: '0.1.0',
+        // Decision 38: the Starter version that generated this project
+        // — the lookup key for post-1.0 migration notes. Written by the
+        // CLI at scaffold time; single source is the CLI's package.json.
+        starterVersion: VERSION,
         private: true,
         type: 'module',
         description: `Scaffolded from create-fs-starter (${shapeLabel}).`,
@@ -55,6 +89,10 @@ function rootPackageJson(name: string, composition: Composition): string {
     {
       name,
       version: '0.1.0',
+      // Decision 38: the Starter version that generated this project
+      // — the lookup key for post-1.0 migration notes. Written by the
+      // CLI at scaffold time; single source is the CLI's package.json.
+      starterVersion: VERSION,
       private: true,
       type: 'module',
       description: 'Scaffolded from create-fs-starter (TS-monolith + Vite+TanStack).',
@@ -141,6 +179,11 @@ function rootTaskfileYml(composition: Composition): string {
 # ai:install\` once, then \`task ai:test\` / \`task ai:lint\` to verify it.
 
 version: "3"
+
+vars:
+  # Decision 38: the Starter version that generated this project — the
+  # lookup key for post-1.0 migration notes (docs/migrations/).
+  starterVersion: "${VERSION}"
 
 tasks:
   default:
@@ -325,6 +368,11 @@ tasks:
 
 version: "3"
 
+vars:
+  # Decision 38: the Starter version that generated this project — the
+  # lookup key for post-1.0 migration notes (docs/migrations/).
+  starterVersion: "${VERSION}"
+
 tasks:
   default:
     desc: List available tasks
@@ -479,6 +527,11 @@ ${mobileBuildTask}
 # client through the /api rewrite (next.config.ts).
 
 version: "3"
+
+vars:
+  # Decision 38: the Starter version that generated this project — the
+  # lookup key for post-1.0 migration notes (docs/migrations/).
+  starterVersion: "${VERSION}"
 
 tasks:
   default:
