@@ -74,6 +74,7 @@ vocabulary every doc references by decision number.
 
 Read `CONTEXT.md` for the design language, `docs/contributing/` for the
 contribution playbook (how to add a new X to the five-axis
-composition), `docs/standards/` for the contribution standards, and
+composition, and how to cut a release — decisions 35/37/38),
+`docs/standards/` for the contribution standards, and
 `docs/agents/issue-tracker.md` for how work is tracked. Issues live on
 [GitHub](https://github.com/Johna210/starter/issues).
