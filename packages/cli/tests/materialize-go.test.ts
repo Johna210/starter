@@ -93,6 +93,11 @@ describe('Go-monolith + Next + no-mobile + no-AI (shape 3 base, issue #13)', () 
     // The vars block sits at the top, next to version: "3".
     const varsBlock = tf.match(/version: "3"\n\nvars:\n(?:  .+\n)+/);
     expect(varsBlock, 'vars block should follow version: "3"').toBeTruthy();
+    // The two-artifact release notes mirror into Go scaffolds too
+    // (decision 38): CHANGELOG at the root (from writeRoot) and the
+    // docs/migrations convention dir (writeMigrationNotes).
+    expect((await stat(join(targetDir, 'CHANGELOG.md'))).isFile()).toBe(true);
+    expect((await stat(join(targetDir, 'docs/migrations/README.md'))).isFile()).toBe(true);
   });
 
   it('root Taskfile declares Go targets and boots web + api via `task dev` (ticket 12)', async () => {

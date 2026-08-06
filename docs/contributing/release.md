@@ -81,7 +81,10 @@ Pushing the tag triggers the Release workflow
 1. **CI gate** — the tagged commit's most recent CI matrix run must be
    success. If it isn't (or CI is still running), the release fails
    with a message; wait for CI, then re-tag.
-2. **Version gate** — tag == `packages/cli/package.json` version == a
+2. **Main-branch gate** — the tagged commit must be on `master`
+   (decision 37: releases are cut on the Starter repo's main branch);
+   a feature-branch tag, even green, is refused.
+3. **Version gate** — tag == `packages/cli/package.json` version == a
    `CHANGELOG.md` entry.
 
 ### 5. Verify the publish

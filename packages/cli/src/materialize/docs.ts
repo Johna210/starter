@@ -36,19 +36,10 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
   await writeFileRecursive(join(targetDir, 'docs/adr/README.md'), adrReadmeMd());
 
   // Decision 38 — the second release-note artifact: docs/migrations/.
-  // The scaffolded project receives the migration notes that APPLY to
-  // the Starter version that generated it (the lookup mechanism below).
-  // Pre-1.0 the lookup is empty (every change is breaking, decision 35
-  // — re-scaffold, no recipes), so the scaffold ships the convention
-  // README only, no notes.
-  const migrationNotes = migrationNotesFor(VERSION);
-  await writeFileRecursive(
-    join(targetDir, 'docs/migrations/README.md'),
-    migrationsReadmeMd(VERSION),
-  );
-  for (const [fileName, content] of migrationNotes) {
-    await writeFileRecursive(join(targetDir, 'docs/migrations/', fileName), content);
-  }
+  // Uniform across all shapes (see materialize.ts: the Go paths call
+  // writeMigrationNotes too); writeDocs additionally ships the rest of
+  // the docs tree for TS shapes.
+  await writeMigrationNotes(ctx);
 
   await writeFileRecursive(join(targetDir, 'docs/standards/code-style.md'),
     isTs ? codeStyleTsMd() : codeStyleGoMd());
@@ -59,6 +50,25 @@ export async function writeDocs(ctx: ProjectContext, composition: Composition): 
       join(targetDir, 'docs/architecture/mobile-auth-flow.md'),
       mobileAuthFlowMd(isMicroservices, mobileVariant),
     );
+  }
+}
+
+// writeMigrationNotes mirrors decision 38's second release-note artifact
+// into a scaffolded project. Called for ALL shapes (TS via writeDocs, Go
+// via the materialize.ts orchestrator): the scaffolded project receives
+// the migration notes that APPLY to the Starter version that generated
+// it (the lookup mechanism below). Pre-1.0 the lookup is empty (every
+// change is breaking, decision 35 — re-scaffold, no recipes), so the
+// scaffold ships the convention README only, no notes.
+export async function writeMigrationNotes(ctx: ProjectContext): Promise<void> {
+  const { targetDir } = ctx;
+  const migrationNotes = migrationNotesFor(VERSION);
+  await writeFileRecursive(
+    join(targetDir, 'docs/migrations/README.md'),
+    migrationsReadmeMd(VERSION),
+  );
+  for (const [fileName, content] of migrationNotes) {
+    await writeFileRecursive(join(targetDir, 'docs/migrations/', fileName), content);
   }
 }
 

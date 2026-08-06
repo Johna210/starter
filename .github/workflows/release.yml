@@ -14,7 +14,10 @@
 #      (decision 37: "a release that doesn't pass the CI matrix breaks
 #      the blessed-2×2 envelope"). This is the "refuses to publish if
 #      green is not the latest state on the tagged commit" enforcement.
-#   2. Version gate — the tag must be semver, must equal
+#   2. Main-branch gate — the tagged commit must be on master (decision
+#      37: "cuts a tag on the Starter repo's main branch"); a feature-
+#      branch tag, even green, is refused.
+#   3. Version gate — the tag must be semver, must equal
 #      packages/cli/package.json's version, and CHANGELOG.md must carry
 #      a matching entry (decision 38's two-artifact release notes).
 #
@@ -67,6 +70,26 @@ jobs:
             exit 1
           fi
           echo "CI gate passed: CI workflow run $(echo "$RUN" | jq -r '.id') is success for ${{ github.sha }}"
+
+      - name: Main-branch gate — the tag must live on master (decision 37)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # compare master...<tag>: 'identical' (tag == master tip) or
+          # 'behind' (master advanced past the tag) mean the tagged
+          # commit is on master; 'ahead' / 'diverged' mean it isn't.
+          STATUS="$(gh api "repos/${{ github.repository }}/compare/master...${{ github.sha }}" --jq -r '.status')"
+          case "$STATUS" in
+            identical|behind)
+              echo "Main-branch gate passed: ${{ github.sha }} is on master (compare status: $STATUS)"
+              ;;
+            *)
+              echo "::error::Tag '$GITHUB_REF_NAME' is not on master (compare status: $STATUS). Decision 37: releases are cut on the Starter repo's main branch — the tag must point at a master commit."
+              exit 1
+              ;;
+          esac
 
       - name: Version gate — tag, package.json, and CHANGELOG must agree
         shell: bash

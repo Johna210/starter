@@ -27,15 +27,17 @@ how to cut a release is in `docs/contributing/release.md`.
   - The CLI's doc generator mirrors the release-note artifacts into
     the scaffolded project: a `CHANGELOG.md` keyed to the generating
     version, and a `docs/migrations/` whose content is conditional on
-    `starterVersion` (empty lookup pre-1.0).
+    `starterVersion` (empty lookup pre-1.0) — in **all** shapes, TS
+    and Go.
   - The CLI's version now has a single source
     (`packages/cli/package.json`), so the CLI, the npm package, and
     the tag cannot drift (decision 35).
   - Release pipeline (`.github/workflows/release.yml`): cutting a
     `vX.Y.Z` tag on `master` gates on the CI matrix being green for
-    the tagged commit, verifies the tag / `package.json` / CHANGELOG
-    versions agree, publishes the CLI to npm, and verifies the
-    published version (decision 37).
+    the tagged commit **and** the commit being on `master`,
+    verifies the tag / `package.json` / CHANGELOG versions agree,
+    publishes the CLI to npm, and verifies the published version
+    (decision 37).
   - Release playbook in `docs/contributing/release.md` (decision 34).
 
 ## [0.1.0]

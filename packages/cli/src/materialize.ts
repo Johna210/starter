@@ -36,7 +36,7 @@ import { writeAuth } from './materialize/auth.js';
 import { writeApi } from './materialize/api.js';
 import { writeApiAuth } from './materialize/api-auth.js';
 import { writeApiAuthService } from './materialize/api-auth-service.js';
-import { writeDocs } from './materialize/docs.js';
+import { writeDocs, writeMigrationNotes } from './materialize/docs.js';
 import { writeE2e } from './materialize/e2e.js';
 import { writeGoApi } from './materialize/go-api.js';
 import { writeGoApiAuthService } from './materialize/go-api-auth.js';
@@ -86,6 +86,7 @@ async function writeGoMicroservicesNextAi(ctx: ProjectContext, composition: Comp
   // contract surface (openapi.ai.yaml + the generated Go client in
   // packages/contract) and consumed by apps/api through that client.
   await writeRoot(ctx, composition);
+  await writeMigrationNotes(ctx);
   await writeGoApiMs(ctx);
   await writeGoApiMsAi(ctx);
   await writeGoApiAuthService(ctx);
@@ -98,6 +99,7 @@ async function writeGoMicroservicesNextAi(ctx: ProjectContext, composition: Comp
 
 async function writeGoMicroservicesNext(ctx: ProjectContext, composition: Composition): Promise<void> {
   await writeRoot(ctx, composition);
+  await writeMigrationNotes(ctx);
   await writeGoApiMs(ctx);
   await writeGoApiAuthService(ctx);
   await writeGoContractMs(ctx);
@@ -110,6 +112,7 @@ async function writeGoMicroservicesNext(ctx: ProjectContext, composition: Compos
 
 async function writeGoMonolithBase(ctx: ProjectContext, composition: Composition): Promise<void> {
   await writeRoot(ctx, composition);
+  await writeMigrationNotes(ctx);
   await writeGoApi(ctx);
   await writeGoContract(ctx);
   await writeNextWeb(ctx, composition);
