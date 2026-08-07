@@ -80,7 +80,7 @@ jobs:
           # compare master...<tag>: 'identical' (tag == master tip) or
           # 'behind' (master advanced past the tag) mean the tagged
           # commit is on master; 'ahead' / 'diverged' mean it isn't.
-          STATUS="$(gh api "repos/${{ github.repository }}/compare/master...${{ github.sha }}" --jq -r '.status')"
+          STATUS="$(gh api "repos/${{ github.repository }}/compare/master...${{ github.sha }}" --jq '.status')"
           case "$STATUS" in
             identical|behind)
               echo "Main-branch gate passed: ${{ github.sha }} is on master (compare status: $STATUS)"
