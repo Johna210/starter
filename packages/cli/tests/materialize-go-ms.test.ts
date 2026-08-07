@@ -80,6 +80,9 @@ describe('Go-microservices + Next + no-mobile + no-AI (shape 4, issue #15)', () 
     expect(devBlock![0]).toMatch(/dev:api-auth/);
     expect(devBlock![0]).toMatch(/dev:api/);
     expect(devBlock![0]).toMatch(/dev:web/);
+    // starterVersion vars (decision 38) — the migration-note lookup key.
+    const { VERSION } = await import('../src/version.js');
+    expect(tf).toContain(`starterVersion: "${VERSION}"`);
     // migrate covers BOTH services' runners.
     expect(tf).toMatch(/migrate:api-auth:/);
     expect(tf).toMatch(/migrate:api:/);

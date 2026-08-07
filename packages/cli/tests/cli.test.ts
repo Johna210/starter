@@ -71,6 +71,10 @@ describe('runCli', () => {
       }
       const pkg = JSON.parse(await readFile(join(targetDir, 'package.json'), 'utf8'));
       expect(pkg.name).toBe('my-app');
+      // Decision 38: the CLI writes starterVersion at scaffold time
+      // (single source, decision 35) — the migration-note lookup key.
+      const { VERSION } = await import('../src/version.js');
+      expect(pkg.starterVersion).toBe(VERSION);
     });
 
     it('materializes the TS + Expo mobile composition when answers are provided', async () => {

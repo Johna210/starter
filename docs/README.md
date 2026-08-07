@@ -18,12 +18,13 @@ asymmetry).
 | [`wire-it-in/`](wire-it-in/) | the **fence-extension convention** — how to add a new fence across the shim, the guide, and the prompt | `docs/wire-it-in/` ("how to fill in this fence") |
 | [`adr/`](adr/) | the Starter's **own future decisions** — `CONTEXT.md` is the predecessor; new decisions land as `NNNN-….md` | `docs/adr/` (the user's project decisions) |
 | [`standards/`](standards/) | the **how of contributing to the Starter** — templates, workspaces, contract-mechanism mechanics, the CI matrix, doc regeneration | `docs/standards/` (the how of working in a scaffolded project) |
-| [`contributing/`](contributing/) | the **contribution playbook** — how to add a new X to the five-axis composition (decision 24) | *none* — Starter-repo-only |
+| [`migrations/`](migrations/) | the **reserved location for post-1.0 migration notes** (decision 38's second release-note artifact; empty pre-1.0 — every 0.x change is breaking, decision 35) | `docs/migrations/` (the notes that apply to the scaffold's `starterVersion`) |
+| [`contributing/`](contributing/) | the **contribution playbook** — how to add a new X to the five-axis composition (decision 24) and how to cut a release (decisions 35/37/38) | *none* — Starter-repo-only |
 
 ## The contribution playbook (`contributing/`)
 
-Six entries — how to add a new X to the five-axis composition
-(decision 24):
+Seven entries — how to add a new X to the five-axis composition
+(decision 24), plus how to cut a release (decision 34):
 
 - [Add a new web variant](contributing/web-variant.md) (decision 15)
 - [Add a new api framework](contributing/api-framework.md) (decision 18)
@@ -31,6 +32,7 @@ Six entries — how to add a new X to the five-axis composition
 - [Add a new fence](contributing/fence.md) (decision 12)
 - [Bump the contract mechanism](contributing/contract-mechanism.md) (decisions 17/19)
 - [Add a new blessed combination](contributing/blessed-combination.md) (decisions 7/24/29)
+- [Cut a release](contributing/release.md) (decisions 35/37/38)
 
 ## The domain subdirs in one line
 
