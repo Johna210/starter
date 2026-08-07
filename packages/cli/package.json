@@ -1,6 +1,6 @@
 {
   "name": "create-fs-starter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Scaffolder for new fullstack projects (the CLI that produces apps from this Starter).",
   "type": "module",
   "engines": {

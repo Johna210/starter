@@ -12,6 +12,10 @@ how to cut a release is in `docs/contributing/release.md`.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [0.2.0] - 2026-08-07
+
 ### Added
 
 - **Release flow (ticket 20)**:
@@ -40,7 +44,7 @@ how to cut a release is in `docs/contributing/release.md`.
     (decision 37).
   - Release playbook in `docs/contributing/release.md` (decision 34).
 
-## [0.1.0]
+## [0.1.0] - 2026-07-25
 
 ### Added
 
@@ -77,5 +81,6 @@ how to cut a release is in `docs/contributing/release.md`.
   contract mechanisms, blessed combinations) and the contribution
   workflow.
 
-[Unreleased]: https://github.com/Johna210/starter/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/Johna210/starter/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Johna210/starter/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Johna210/starter/releases/tag/v0.2.0
+[0.1.0]: https://www.npmjs.com/package/create-fs-starter/v/0.1.0
